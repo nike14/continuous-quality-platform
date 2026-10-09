@@ -20,7 +20,7 @@ Needs Docker and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv run python scripts/dev_token.py > /dev/null   # once: creates a local signing key in dev/
-docker compose up -d --build                     # Kafka, Postgres, OPA and all four services
+docker compose up -d --build                     # Kafka, Postgres, OPA and the four deployables
 ./scripts/demo.sh                                # upload a failing test report, ask the PR gate
 ```
 
@@ -36,7 +36,12 @@ gate exit code: 1
 The notifier then logs the MR comment and commit status it would post. With no GitLab
 configured, it logs instead of calling GitLab.
 
-| Service | What it runs | Reach it at |
+CQP itself is **four deployables** (ingestion API, store worker, Decision API, notifier): one
+repository and one image, started with four different commands. They're split because their load
+and failure behaviour differ, and kept in one repo because the code they share is the contract
+between them. The table lists every docker-compose container, including the infrastructure.
+
+| Container | What it runs | Reach it at |
 | --- | --- | --- |
 | `gateway` | Caddy: decisions, policies, waivers, kill switches and `/portal` → Decision API; everything else → ingestion | http://localhost:8080 (`CQP_URL`), portal at `/portal` |
 | `ingestion-api` | Gather | via gateway |
@@ -47,7 +52,7 @@ configured, it logs instead of calling GitLab.
 | `postgres` | Evidence and decisions | `postgresql://cqp:cqp@localhost:5433/cqp` |
 | `opa` | Policy engine sidecar | internal |
 | `dev-idp` | Serves the dev **public** key, standing in for GitLab's OIDC keys | internal |
-| `prometheus` | Scrapes all four services; evaluates the alert rules | http://localhost:9090 (alerts at `/alerts`) |
+| `prometheus` | Scrapes the four deployables; evaluates the alert rules | http://localhost:9090 (alerts at `/alerts`) |
 
 Fill every table with varied data to look at (for example in TablePlus at `127.0.0.1:5433`,
 user, password and database all `cqp`). It covers 3 services, every report format, and all four

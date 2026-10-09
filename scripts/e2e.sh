@@ -256,7 +256,7 @@ prom() { curl -s "http://localhost:9090/api/v1/$1"; }
 up_targets() { prom targets | python3 -c 'import json,sys; print(sum(t["health"] == "up" for t in json.load(sys.stdin)["data"]["activeTargets"] if t["labels"]["job"] == "cqp"))'; }
 firing() { prom alerts | python3 -c 'import json,sys; print(sum(a["labels"]["alertname"] == sys.argv[1] and a["state"] == "firing" for a in json.load(sys.stdin)["data"]["alerts"]))' "$1"; }
 for _ in $(seq 12); do [ "$(up_targets)" == "4" ] && break; sleep 5; done
-check "Prometheus scrapes all four CQP services" 4 "$(up_targets)"
+check "Prometheus scrapes all four CQP deployables" 4 "$(up_targets)"
 # The unreadable report earlier in this run went to the dead-letter topic; that must raise a ticket.
 for _ in $(seq 12); do [ "$(firing DeadLetterGrowing)" == "1" ] && break; sleep 5; done
 check "the dead-letter alert is firing" 1 "$(firing DeadLetterGrowing)"

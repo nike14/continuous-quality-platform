@@ -1,4 +1,4 @@
-# Prometheus for the local stack: scrapes the four CQP services and evaluates alerts.yml.
+# Prometheus for the local stack: scrapes the four CQP deployables and evaluates alerts.yml.
 # Alertmanager isn't wired up; firing alerts show at http://localhost:9090/alerts.
 global:
   scrape_interval: 15s
