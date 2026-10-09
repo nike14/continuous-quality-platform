@@ -75,7 +75,7 @@ def test_break_glass_lets_the_change_through_and_is_counted(setup, conn):
     api, connect, policy = setup
     d = blocked_pr(conn, api)
     # Read the counter first, so the check holds whatever ran before.
-    before = REGISTRY.get_sample_value("cqp_break_glass_total", {"stage": "pr"})
+    before = REGISTRY.get_sample_value("cqp_break_glass_total", {"stage": "pr"}) or 0
     assert glass(api, d["decision_id"]).status_code == 201
 
     again = ask(api, "pr")

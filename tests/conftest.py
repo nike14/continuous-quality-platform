@@ -37,6 +37,7 @@ TOKENS = {
     "security-token": {**CLAIMS, "cqp_role": "security", "user_login": "secops"},
     "platform-token": {**CLAIMS, "cqp_role": "platform", "user_login": "platform-oncall"},
     "oncall-token": {**CLAIMS, "cqp_role": "oncall", "user_login": "sre"},
+    "no-sha-token": {k: v for k, v in CLAIMS.items() if k != "sha"},
     "deployer-token": {**CLAIMS, "project_path": "platform/deployer", "sha": "d" * 40},
     "deployer-branch-token": {
         **CLAIMS,

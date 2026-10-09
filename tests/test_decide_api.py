@@ -287,13 +287,11 @@ def test_decisions_and_findings_are_counted(setup, conn):
     ask(api, "pr")
 
     assert REGISTRY.get_sample_value("cqp_decisions_total", labels) == before + 1
-    assert (
-        REGISTRY.get_sample_value(
-            "cqp_findings_total", {"rule": "baseline.tests.unit", "effect": "block"}
-        )
-        >= 1
+    findings = REGISTRY.get_sample_value(
+        "cqp_findings_total", {"rule": "baseline.tests.unit", "effect": "block"}
     )
-    assert REGISTRY.get_sample_value("cqp_decision_seconds_count") >= 1
+    assert (findings or 0) >= 1
+    assert (REGISTRY.get_sample_value("cqp_decision_seconds_count") or 0) >= 1
 
 
 # ---- Who may ask ----
@@ -328,3 +326,19 @@ def test_deployer_sees_evidence_from_the_commit_that_built_the_image(setup, conn
     record(conn, "tests.unit", "fail", {"failed": 1, "failing": ["A.b"]})  # on the commit only
     d = ask(api, "prod-deploy", image=IMAGE)
     assert "tests.unit" in d["input"]["evidence"]
+
+
+def test_a_token_without_a_commit_gets_a_clear_error(setup):
+    api, _, _ = setup
+    r = api.post(
+        "/v1/decisions",
+        json={"service": "payments-api", "stage": "pr"},
+        headers={"Authorization": "Bearer no-sha-token"},
+    )
+    assert r.status_code == 422 and "no commit" in r.text
+
+
+def test_replaying_an_unknown_decision_says_so(setup):
+    _, connect, policy = setup
+    with pytest.raises(LookupError, match="no decision"):
+        replay(connect, policy, "nope")

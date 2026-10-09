@@ -39,3 +39,19 @@ def test_path_parts_in_a_file_name_are_dropped(server, tmp_path):
     )
     assert sorted(p.name for p in Path(ref).iterdir()) == ["junit.xml", "outside.xml"]
     assert not (tmp_path / "outside.xml").exists()
+
+
+def test_every_part_is_kept_even_without_a_usable_name(server, tmp_path):
+    # Unnamed parts, names that reduce to nothing, and two parts with the same name.
+    parts = [
+        ("", b"1"),
+        ("", b"2"),
+        ("/", b"3"),
+        ("..", b"4"),
+        ("a/junit.xml", b"5"),
+        ("b/junit.xml", b"6"),
+    ]
+    ref = Path(server.local_store(tmp_path)("e-3", parts))
+    saved = {p.name: p.read_bytes() for p in ref.iterdir()}
+    assert sorted(saved.values()) == [b"1", b"2", b"3", b"4", b"5", b"6"]
+    assert all(p.parent == ref for p in ref.iterdir())  # nothing written outside the folder

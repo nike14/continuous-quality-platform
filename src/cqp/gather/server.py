@@ -17,8 +17,15 @@ def local_store(root: Path):
         """Saves one upload's files under its event ID and returns the folder."""
         folder = root / event_id
         folder.mkdir(parents=True, exist_ok=True)
-        for name, data in files:
-            (folder / Path(name).name).write_bytes(data)  # basename only, no path tricks
+        used: set[str] = set()
+        for i, (name, data) in enumerate(files, 1):
+            base = Path(name).name  # basename only, no path tricks
+            if base in ("", ".", ".."):
+                base = f"upload-{i}"  # no usable name: "", "/" or ".."
+            if base in used:
+                base = f"{i}-{base}"  # a/junit.xml and b/junit.xml must both be kept
+            used.add(base)
+            (folder / base).write_bytes(data)
         return str(folder)
 
     return store

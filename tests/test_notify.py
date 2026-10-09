@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from cqp.notify import db
-from cqp.notify.worker import handle, post_to_slack, render, sweep
+from cqp.notify.worker import decode, handle, post_to_slack, render, sweep
 from cqp.store.db import save
 from prometheus_client import REGISTRY
 
@@ -70,7 +70,8 @@ def test_comment_explains_the_decision():
 
 
 def test_blocked_pr_gets_a_comment_and_a_failed_status(conn):
-    gitlab, posted = FakeGitLab(), []
+    gitlab = FakeGitLab()
+    posted: list[str] = []
     handle(decision(), gitlab, conn, posted.append)
 
     assert gitlab.comments[0][:2] == ("payments/payments-api", 7)
@@ -79,7 +80,7 @@ def test_blocked_pr_gets_a_comment_and_a_failed_status(conn):
 
 
 def test_production_problem_goes_to_slack(conn):
-    posted = []
+    posted: list[str] = []
     handle(decision("prod-deploy", merge_request=None), FakeGitLab(), conn, posted.append)
     assert "BLOCKED at prod-deploy" in posted[0] and "tests.unit failed" in posted[0]
 
@@ -165,7 +166,7 @@ def test_sweep_retries_the_gate_when_the_deadline_passes(conn):
 
 
 def test_break_glass_is_announced_at_any_stage(conn):
-    posted = []
+    posted: list[str] = []
     bg = {
         "rule": "baseline.break_glass",
         "effect": "warn",
@@ -211,7 +212,7 @@ def test_expiring_waiver_is_reminded_once(conn):
             "expires_at": T0 + timedelta(days=20),
         },
     )
-    posted = []
+    posted: list[str] = []
     remind(conn, posted.append, T0)
     remind(conn, posted.append, T0)  # the next sweep: already reminded, so nothing new
     assert len(posted) == 1 and "SEC-1" in posted[0] and "secops" in posted[0]
@@ -242,3 +243,15 @@ def test_slack_posts_are_counted_and_failures_raised(monkeypatch):
 
     assert sent[0] == {"text": "deploy blocked"}
     assert count("ok") == ok + 1 and count("error") == error + 1
+
+
+@pytest.mark.parametrize(
+    "value", [None, b"", b"not json", b"null", b"[1, 2]", b'{"no": "context"}']
+)
+def test_a_message_that_is_not_a_decision_is_skipped(value):
+    # Returning None makes the worker commit past it instead of crashing on it again and again.
+    assert decode(value) is None
+
+
+def test_a_decision_message_is_decoded():
+    assert decode(b'{"decision_id": "d-1", "context": {}}') == {"decision_id": "d-1", "context": {}}

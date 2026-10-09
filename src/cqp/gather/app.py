@@ -81,7 +81,8 @@ def create_app(
             image=m.image,
         )
         # Files first: the event only points at them, and the store worker reads them back.
-        event["raw_ref"] = store(event["event_id"], [(f.filename, await f.read()) for f in files])
+        saved = [(f.filename or "", await f.read()) for f in files]  # the store names unnamed parts
+        event["raw_ref"] = store(event["event_id"], saved)
         event_id = emit(event)
         INGESTED.labels("ci", "accepted").inc()
         return {"event_id": event_id}

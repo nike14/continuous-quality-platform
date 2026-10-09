@@ -31,7 +31,8 @@ def junit(files: Files):
 
 def sarif(files: Files):
     """Static-analysis results: counts by level, plus fingerprints."""
-    by_level, fingerprints = Counter(), []
+    by_level: Counter[str] = Counter()
+    fingerprints: list[str] = []
     for _, data in files:
         for run in json.loads(data)["runs"]:
             for r in run.get("results", []):
@@ -47,7 +48,8 @@ def sarif(files: Files):
 
 def cyclonedx(files: Files):
     """Vulnerability scan (SBOM): counts by severity, plus CVE IDs."""
-    by_severity, ids = Counter(), []
+    by_severity: Counter[str] = Counter()
+    ids: list[str] = []
     for _, data in files:
         for v in json.loads(data).get("vulnerabilities", []):
             # First rating is the scanner's own. Some entries have none at all.

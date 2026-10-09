@@ -1,6 +1,7 @@
 """The three GitLab calls the notifier needs: MR comment, commit status, job retry."""
 
 import logging
+from typing import Protocol
 from urllib.parse import quote
 
 import httpx
@@ -9,6 +10,18 @@ from cqp.metrics import NOTIFICATIONS
 
 MARKER = "<!-- cqp -->"  # finds our one MR comment so it can be updated in place
 log = logging.getLogger(__name__)
+
+
+class GitLabAPI(Protocol):
+    """What the notifier needs from GitLab. GitLab, LogOnlyGitLab and the test fake all fit."""
+
+    def upsert_mr_comment(self, project: str, mr: int, body: str) -> None: ...
+
+    def set_status(
+        self, project: str, sha: str, state: str, name: str, description: str
+    ) -> None: ...
+
+    def retry_job(self, project: str, job_id: str) -> None: ...
 
 
 class GitLab:

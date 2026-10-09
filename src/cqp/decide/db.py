@@ -157,9 +157,9 @@ def runtime(conn, service: str, now: datetime) -> dict:
     ).fetchone()[0]
     # Missing data stays None rather than a guess; baseline.rego decides what None means.
     return {
-        "error_budget_remaining": slo[0]["error_budget_remaining"] if slo else None,
-        "health_observed_at": slo[1].isoformat() if slo else None,
-        "health_fresh": bool(slo) and now - slo[1] <= HEALTH_FRESHNESS,
+        "error_budget_remaining": slo[0]["error_budget_remaining"] if slo is not None else None,
+        "health_observed_at": slo[1].isoformat() if slo is not None else None,
+        "health_fresh": slo is not None and now - slo[1] <= HEALTH_FRESHNESS,
         "incident": incident[0]["severity"]
         if incident and incident[0]["state"] == "open"
         else None,

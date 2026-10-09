@@ -133,6 +133,9 @@ def create_app(
         commit = None if req.stage == "prod-deploy" else claims.get("sha")
         # A decision is about the image once there is one, before that about the commit.
         subject = req.image or commit
+        if not subject:
+            # Only a token without a commit claim gets here; there is nothing to decide about.
+            raise HTTPException(422, "the token has no commit (sha) and no image was given")
         tier = policy.tier(req.service)
         now = clock()
 
@@ -420,6 +423,8 @@ def replay(connect: Callable, policy: Policy, decision_id: str) -> bool:
     """Re-evaluates a stored decision on its own snapshot. True if it gives the same outcome."""
     with connect() as conn:
         d = db.get(conn, decision_id)
+    if d is None:
+        raise LookupError(f"no decision {decision_id}")
     if d["policy_version"] != policy.version:
         raise ValueError(f"decision used policy {d['policy_version']}, loaded {policy.version}")
     # A pending decision never ran the rules, so there is nothing to compare.

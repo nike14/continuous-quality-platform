@@ -14,7 +14,7 @@ from cqp.decide import db as decide_db
 from cqp.decide.app import DECISIONS_TOPIC, IN_FLIGHT_GRACE
 from cqp.metrics import GATE_RETRIES, NOTIFICATIONS, WAITING
 from cqp.notify import db
-from cqp.notify.gitlab import MARKER, GitLab, LogOnlyGitLab
+from cqp.notify.gitlab import MARKER, GitLab, GitLabAPI, LogOnlyGitLab
 from cqp.store.db import latest
 
 SWEEP_SECONDS = 10
@@ -46,7 +46,22 @@ def render(d: dict) -> str:
     return "\n".join(lines)
 
 
-def handle(d: dict, gitlab: GitLab, conn, slack=None) -> None:
+def decode(value: bytes | None) -> dict | None:
+    """The decision in a Kafka message, or None if the message isn't one."""
+    try:
+        d = json.loads(value) if value else None
+    except ValueError:
+        d = None
+    if isinstance(d, dict) and "context" in d:
+        return d
+    # Skipped, not retried: a bad message would otherwise stop the notifier for good.
+    # Nothing is lost; the decision itself is in Postgres.
+    if value:
+        log.warning("skipping a message that isn't a decision: %.80r", value)
+    return None
+
+
+def handle(d: dict, gitlab: GitLabAPI, conn, slack=None) -> None:
     """Acts on one decision: MR comment, commit status, waiting-job bookkeeping, Slack."""
     ctx = d["context"]
     if ctx.get("merge_request"):
@@ -98,7 +113,7 @@ def handle(d: dict, gitlab: GitLab, conn, slack=None) -> None:
         )
 
 
-def sweep(conn, gitlab: GitLab, now: datetime) -> None:
+def sweep(conn, gitlab: GitLabAPI, now: datetime) -> None:
     """Retries gate jobs whose missing checks have arrived or whose deadline has passed."""
     still_waiting = 0
     for project, job_id, service, subject, _stage, checks, deadline in db.waiting(conn):
@@ -152,15 +167,12 @@ def main() -> None:
     )
     logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
     api = os.environ.get("CQP_GITLAB_API")
-    gitlab = (
-        GitLab(
-            httpx.Client(
-                base_url=api, timeout=10, headers={"PRIVATE-TOKEN": os.environ["CQP_GITLAB_TOKEN"]}
-            )
-        )
-        if api
-        else LogOnlyGitLab()
-    )
+    gitlab: GitLabAPI
+    if api:
+        token = {"PRIVATE-TOKEN": os.environ["CQP_GITLAB_TOKEN"]}
+        gitlab = GitLab(httpx.Client(base_url=api, timeout=10, headers=token))
+    else:
+        gitlab = LogOnlyGitLab()  # local runs: log what would be sent
     webhook = os.environ.get("CQP_SLACK_WEBHOOK")
     slack = (lambda text: post_to_slack(webhook, text)) if webhook else None
 
@@ -175,7 +187,8 @@ def main() -> None:
             if msg is not None:
                 if msg.error():
                     raise RuntimeError(msg.error())
-                handle(json.loads(msg.value()), gitlab, conn, slack)
+                if (d := decode(msg.value())) is not None:
+                    handle(d, gitlab, conn, slack)
                 consumer.commit(message=msg, asynchronous=False)  # after the side effects
             if time.monotonic() - last_sweep >= SWEEP_SECONDS:
                 sweep(conn, gitlab, datetime.now(UTC))

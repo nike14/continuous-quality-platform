@@ -90,7 +90,7 @@ def test_gitlab_outage_is_counted_as_a_notifier_error():
     before = value("cqp_notifications_total", target="gitlab", result="error")
     # A 5xx is raised so the worker retries the message, and it's counted as an error.
     with pytest.raises(httpx.HTTPStatusError):
-        gitlab.retry_job("payments/payments-api", 1)
+        gitlab.retry_job("payments/payments-api", "1")
     assert value("cqp_notifications_total", target="gitlab", result="error") == before + 1
 
 

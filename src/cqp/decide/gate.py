@@ -51,6 +51,7 @@ def ask(client, url, token, body, sleep) -> dict:
             if attempt == 2:
                 raise
         sleep(1)
+    raise AssertionError("unreachable: the last attempt returns or raises")
 
 
 def gate(
