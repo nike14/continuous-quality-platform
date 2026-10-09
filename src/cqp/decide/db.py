@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE INDEX IF NOT EXISTS decisions_by_subject ON decisions (service, subject, stage, created_at);
 -- The CI job that asked, so a repeat poll from the same job can reuse its pending decision.
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS job_id text;
+-- The service's adoption mode when it was decided: shadow, advisory or enforce.
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS mode text;
 
 -- Every baseline the Decision API has run with,
 -- so an old decision can be replayed on its own rules.
@@ -116,8 +118,8 @@ def insert(conn, d: dict) -> None:
     # The full input is stored with it; that's what makes replay possible.
     conn.execute(
         """INSERT INTO decisions (decision_id, service, subject, stage, status, outcome, findings,
-                                  waiting, input, policy_version, created_at, job_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                  waiting, input, policy_version, created_at, job_id, mode)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             d["decision_id"],
             d["service"],
@@ -131,6 +133,7 @@ def insert(conn, d: dict) -> None:
             d["policy_version"],
             d["created_at"],
             d.get("job_id"),
+            d.get("mode", "enforce"),
         ),
     )
 

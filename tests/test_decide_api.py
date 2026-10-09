@@ -447,3 +447,18 @@ def test_a_fix_without_a_ticket_is_refused(setup):
     api, _, _ = setup
     body = {"service": "payments-api", "stage": "prod-deploy", "image": IMAGE, "fix_ticket": ""}
     assert api.post("/v1/decisions", json=body, headers=DEPLOY).status_code == 422
+
+
+def test_each_decision_records_the_services_adoption_mode(setup, conn):
+    api, _, _ = setup
+    assert ask(api, "pr")["mode"] == "enforce"
+    r = api.post(
+        "/v1/decisions",
+        json={"service": "checkout-web", "stage": "pr"},
+        headers={"Authorization": "Bearer other-repo-token"},
+    )
+    assert r.json()["mode"] == "advisory"
+    assert (
+        conn.execute("SELECT mode FROM decisions WHERE service = 'checkout-web'").fetchone()[0]
+        == "advisory"
+    )

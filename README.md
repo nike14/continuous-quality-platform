@@ -384,6 +384,21 @@ rules switched off, break-glass in the last 7 days, each service's tier, owner a
 version, and recent decisions. Changes use a pasted token locally; in production the portal
 would sit behind company SSO.
 
+## Adoption modes
+
+Each service has a `mode` in `policy/catalog.yaml`, so CQP arrives without breaking anyone's
+pipeline and a team moves up a phase with a one-line change:
+
+| Mode | Decision recorded | Gate | MR comment and commit status | Slack |
+| --- | --- | --- | --- | --- |
+| `shadow` | yes | exits 0 at once, never waits | none: nobody sees anything yet | no |
+| `advisory` | yes | exits 0 at once; the log says "would be BLOCKED" | comment marked advisory; status stays green | no |
+| `enforce` (default) | yes | acts on the outcome | as described above | production problems |
+
+The outcome is worked out the same way in every mode, so the decisions table shows what
+enforcement *would* have done (the "would have blocked" rate per team). That number is the gate
+for moving a team from shadow to advisory to enforce. In this repo `checkout-web` is advisory.
+
 ## How CQP itself is observed
 
 Each service exposes `/metrics` (the APIs on their own port, the workers on 9100). Prometheus

@@ -11,6 +11,7 @@ from conftest import CLAIMS, T0
 from cqp.decide.gate import gate
 from cqp.notify import db as notify_db
 from cqp.notify.worker import handle, sweep
+from cqp.store.db import save
 from test_decide_api import ask, record
 from test_notify import FakeGitLab
 
@@ -54,3 +55,35 @@ def test_the_gate_reads_the_real_api_answer(setup, conn, tmp_path, monkeypatch):
     record(conn, "scan.secrets")
     code = gate("payments-api", "pr", "http://testserver", "good-token", api, sleep=lambda s: None)
     assert code == 1  # BLOCKED
+
+
+@pytest.mark.filterwarnings("ignore:You should not use the 'timeout' argument")
+def test_an_advisory_service_is_blocked_on_paper_but_its_pipeline_carries_on(
+    setup, conn, tmp_path, monkeypatch, capsys
+):
+    # checkout-web is in advisory mode in policy/catalog.yaml.
+    api, _, _ = setup
+    monkeypatch.chdir(tmp_path)
+    save(
+        conn,
+        {
+            "event_id": "co-unit",
+            "service": "checkout-web",
+            "commit": CLAIMS["sha"],
+            "image": None,
+            "check": "tests.unit",
+            "kind": "outcome",
+            "status": "fail",
+            "run": "1",
+            "producer": "ci",
+            "payload": {"failing": ["Cart.total"]},
+            "raw_ref": None,
+            "observed_at": T0.isoformat(),
+        },
+    )
+    conn.commit()
+    code = gate(
+        "checkout-web", "pr", "http://testserver", "other-repo-token", api, sleep=lambda s: None
+    )
+    assert code == 0
+    assert "advisory mode: this would be BLOCKED" in capsys.readouterr().err

@@ -5,6 +5,10 @@ from pathlib import Path
 
 import yaml
 
+# Adoption phases. shadow: decisions are recorded, nobody sees them. advisory: teams see them,
+# nothing is stopped. enforce: the gate acts on them.
+MODES = {"shadow", "advisory", "enforce"}
+
 
 class Catalog:
     """Reads policy/catalog.yaml and policy/trust.yaml."""
@@ -24,6 +28,13 @@ class Catalog:
     def tier(self, service: str) -> str:
         """The service's tier; unlisted services get the default rules."""
         return self.get(service).get("tier", "default")
+
+    def mode(self, service: str) -> str:
+        """How far along adoption this service is: shadow, advisory or enforce (the default)."""
+        mode = self.get(service).get("mode", "enforce")
+        if mode not in MODES:
+            raise ValueError(f"{service}: unknown mode {mode!r}, expected one of {sorted(MODES)}")
+        return mode
 
     def repo(self, service: str) -> str | None:
         """The repo that owns the service, or None."""

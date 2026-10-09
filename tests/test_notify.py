@@ -318,3 +318,21 @@ def test_poll_once_commits_past_a_message_that_is_not_a_decision(conn):
 def test_poll_once_raises_on_a_kafka_error(conn):
     with pytest.raises(RuntimeError, match="broker gone"):
         poll_once(Consumer(Msg(None, error="broker gone")), FakeGitLab(), conn)
+
+
+# ---- Adoption modes ----
+
+
+def test_shadow_mode_shows_nothing(conn):
+    gitlab = FakeGitLab()
+    posted: list[str] = []
+    handle({**decision("prod-deploy"), "mode": "shadow"}, gitlab, conn, posted.append)
+    assert gitlab.comments == [] and gitlab.statuses == [] and posted == []
+
+
+def test_advisory_mode_comments_but_keeps_the_status_green_and_slack_quiet(conn):
+    gitlab = FakeGitLab()
+    posted: list[str] = []
+    handle({**decision("prod-deploy"), "mode": "advisory"}, gitlab, conn, posted.append)
+    assert "Advisory: not enforced yet" in gitlab.comments[0][2]
+    assert gitlab.statuses == [("success", "cqp/prod-deploy")] and posted == []

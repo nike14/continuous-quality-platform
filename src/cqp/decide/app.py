@@ -223,6 +223,8 @@ def create_app(
                 "policy_version": policy.version,
                 "created_at": now,
                 "job_id": job_id,
+                # The outcome is the same in every mode; only what the gate does with it differs.
+                "mode": policy.catalog.mode(req.service),
             }
             db.insert(conn, decision)
 

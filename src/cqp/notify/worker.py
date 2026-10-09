@@ -38,6 +38,8 @@ def render(d: dict) -> str:
     )
     # The hidden marker goes first, so the next decision updates this comment instead of adding one.
     lines = [MARKER, f"**{ICON[d['outcome']]} Quality: {title}** at `{d['stage']}`", ""]
+    if d.get("mode") == "advisory":
+        lines += ["_Advisory: not enforced yet for this service, so nothing is stopped._", ""]
     lines += [f"- **{f['effect']}** · {f['message']} (`{f['rule']}`)" for f in d["findings"]]
     lines += [f"- waiting for `{w.get('check') or w.get('event_id')}`" for w in d["waiting"]]
     if not d["findings"] and not d["waiting"]:
@@ -64,12 +66,19 @@ def decode(value: bytes | None) -> dict | None:
 def handle(d: dict, gitlab: GitLabAPI, conn, slack=None) -> None:
     """Acts on one decision: MR comment, commit status, waiting-job bookkeeping, Slack."""
     ctx = d["context"]
+    mode = d.get("mode", "enforce")
+    if mode == "shadow":
+        return  # recorded in Postgres to measure what would happen; nobody is shown anything yet
     if ctx.get("merge_request"):
         gitlab.upsert_mr_comment(ctx["project"], ctx["merge_request"], render(d))
     if ctx.get("commit"):
         # One status per stage (cqp/pr, cqp/build...), so GitLab shows each gate separately.
         state = "pending" if d["status"] == "pending" else COMMIT_STATE[d["outcome"]]
+        if mode == "advisory":
+            state = "success"  # advice only: a red status would block merges
         gitlab.set_status(ctx["project"], ctx["commit"], state, f"cqp/{d['stage']}", d["outcome"])
+    if mode != "enforce":
+        return  # the gate didn't wait, so there's no job to resume, and no page for advice
 
     with conn.transaction():
         if d["status"] == "pending" and ctx.get("job_id"):

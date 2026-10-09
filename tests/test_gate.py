@@ -124,3 +124,22 @@ def test_a_fix_sends_its_ticket():
         fix_ticket="INC-7",
     )
     assert b'"fix_ticket":"INC-7"' in calls[0].content.replace(b" ", b"")
+
+
+# ---- Adoption modes ----
+
+
+def test_advisory_mode_reports_a_block_but_never_stops_the_pipeline(capsys):
+    client, _ = cqp_answering({**decision(outcome="BLOCKED"), "mode": "advisory"})
+    assert run(client) == 0
+    assert "advisory mode: this would be BLOCKED" in capsys.readouterr().err
+
+
+def test_outside_enforce_mode_the_gate_never_waits():
+    # A 2-hour check must not hold a pipeline that the answer can't stop anyway.
+    pending = {
+        **decision("pending", "REQUIRE_VALIDATION", waiting=[{"check": "perf.load"}]),
+        "mode": "shadow",
+    }
+    client, calls = cqp_answering(pending)
+    assert run(client) == 0 and len(calls) == 1

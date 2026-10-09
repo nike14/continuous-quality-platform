@@ -222,6 +222,19 @@ check "the break-glass alert fires" 1 "$(for _ in $(seq 30); do
   n="$(curl -s "http://localhost:9090/api/v1/alerts" | grep -c BreakGlassUsed)"; [ "$n" -gt 0 ] && break; sleep 5; done; echo "${n:-0}")"
 check "the portal shows the break-glass" yes "$(curl -s "$CQP_URL/portal" | grep -q 'INC-E2E' && echo yes)"
 
+echo "== adoption modes"
+
+# checkout-web is in advisory mode (policy/catalog.yaml): it's told, but never stopped.
+workspace; sha="$(newsha)"; export SERVICE=checkout-web CQP_TOKEN="$(token "$sha" "" checkout/checkout-web)"
+upload tests.unit junit "$JUNIT_FAIL" junit.xml
+upload scan.secrets sarif "$SARIF_CLEAN" secrets.sarif
+check "advisory mode: a failing test doesn't stop the pipeline" 0 "$(gate --stage pr)"
+check "...but the log says it would be blocked once enforced" yes \
+  "$(grep -q 'advisory mode: this would be BLOCKED' gate.log && echo yes)"
+check "...and the decision is recorded as BLOCKED for the adoption numbers" BLOCKED \
+  "$(sql "select outcome from decisions where service = 'checkout-web' and subject = '$sha' order by created_at desc limit 1")"
+unset SERVICE
+
 echo "== failures"
 
 compose stop decision-api >/dev/null 2>&1

@@ -95,7 +95,8 @@ def gate(
             return fallback(stage, str(e))
         except httpx.HTTPError as e:
             return fallback(stage, str(e))
-        if d["status"] == "final" or clock() >= give_up:
+        # Outside enforce mode the answer can't stop anything, so there's nothing to wait for.
+        if d["status"] == "final" or clock() >= give_up or d.get("mode", "enforce") != "enforce":
             break
         sleep(POLL_SECONDS)
 
@@ -104,4 +105,10 @@ def gate(
         say(f"  [{f['effect']}] {f['message']}")
     for w in d["waiting"]:
         say(f"  waiting for {w.get('check') or w.get('event_id')}")
+    mode = d.get("mode", "enforce")
+    if mode != "enforce":
+        # Adoption phase: show what would happen, but never stop the pipeline.
+        if EXIT[d["outcome"]] != 0 or d["status"] == "pending":
+            say(f"{mode} mode: this would be {d['outcome']} once enforced; carrying on")
+        return 0
     return EXIT[d["outcome"]]

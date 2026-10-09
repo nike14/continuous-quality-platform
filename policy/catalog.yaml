@@ -1,7 +1,9 @@
 # Stand-in for the service catalog. CQP reads tier, owner and repo from it and keeps no copy of its own.
 # `repo` is the only project allowed to publish the service's team policy.
+# `mode` is how far along adoption the service is: shadow (recorded only), advisory (shown, never
+# stops a pipeline) or enforce (the default). Moving a service up a phase is a one-line change here.
 payments-api: {tier: tier-1, owner: payments, repo: payments/payments-api}
-checkout-web: {tier: default, owner: checkout, repo: checkout/checkout-web}
+checkout-web: {tier: default, owner: checkout, repo: checkout/checkout-web, mode: advisory}
 ledger-service: {tier: default, owner: payments, repo: payments/ledger-service}
 # Throwaway services the e2e tests create (one per run, so their production state doesn't leak).
 "e2e-svc-*": {tier: default, owner: platform, repo: platform/e2e}
