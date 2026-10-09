@@ -1,0 +1,34 @@
+# Which checks each stage expects, by service tier ("default" when the tier has no entry).
+# If a check hasn't reported `deadline` minutes after the first decision request for that
+# change and stage, `on_missing` applies: warn | validate | block. Deadline 0 = must already be there.
+pr:
+  default:
+    tests.unit: {deadline: 0, on_missing: warn}
+    scan.secrets: {deadline: 0, on_missing: warn}
+
+build:
+  default:
+    tests.unit: {deadline: 0, on_missing: warn}
+    tests.contract: {deadline: 0, on_missing: warn}
+    scan.sca: {deadline: 15, on_missing: block}
+    scan.secrets: {deadline: 0, on_missing: block}
+
+integration:
+  default:
+    tests.integration: {deadline: 30, on_missing: validate}
+    perf.load: {deadline: 120, on_missing: warn}
+
+prod-deploy:
+  tier-1:
+    build.provenance: {deadline: 0, on_missing: block}
+    tests.unit: {deadline: 0, on_missing: block}
+    tests.contract: {deadline: 0, on_missing: block}
+    scan.sca: {deadline: 0, on_missing: block}
+    scan.secrets: {deadline: 0, on_missing: block}
+    tests.integration: {deadline: 0, on_missing: validate}
+    perf.load: {deadline: 0, on_missing: validate}
+  default:
+    build.provenance: {deadline: 0, on_missing: block}
+    tests.unit: {deadline: 0, on_missing: validate}
+    scan.sca: {deadline: 0, on_missing: validate}
+    scan.secrets: {deadline: 0, on_missing: validate}

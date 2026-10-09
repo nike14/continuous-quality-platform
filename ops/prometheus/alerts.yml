@@ -1,0 +1,93 @@
+# Alerts for operating CQP itself. severity: page = delivery is affected now; ticket = fix soon.
+groups:
+  - name: cqp
+    rules:
+      - alert: CQPServiceDown
+        expr: up{job="cqp"} == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.instance }} is not responding"
+          runbook: "Gates fall back to baseline-only checks while it is down. Check its logs and restarts."
+
+      - alert: DecisionAPIErrors
+        # More than 1% of decision requests fail: burns the 99.9% availability budget 10x too fast.
+        expr: >
+          rate(cqp_decision_errors_total[5m])
+            / clamp_min(rate(cqp_decision_seconds_count[5m]), 1e-9) > 0.01
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Decision API error rate is {{ $value | humanizePercentage }}"
+          runbook: "Usually Postgres or OPA. Check decision-api logs, then the database and the OPA sidecar."
+
+      - alert: DecisionLatencyHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(cqp_decision_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "Decision p99 latency is {{ $value | humanizeDuration }} (SLO: under 1s)"
+          runbook: "Gates time out after 5s and fall back. Check slow queries and OPA response time."
+
+      - alert: EvidenceDelayed
+        expr: histogram_quantile(0.99, sum by (le) (rate(cqp_evidence_delay_seconds_bucket[10m]))) > 60
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Evidence takes {{ $value | humanizeDuration }} to be stored (SLO: under 60s)"
+          runbook: "Gates wait longer and may decide without fresh evidence. Check store-worker and Kafka."
+
+      - alert: TooManyBlocks
+        # A sudden jump in blocks usually means a bad rule release, not a bad week for every team.
+        expr: >
+          sum(rate(cqp_decisions_total{status="final", outcome="BLOCKED"}[30m]))
+            / clamp_min(sum(rate(cqp_decisions_total{status="final"}[30m])), 1e-9) > 0.5
+        for: 15m
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of decisions are blocked"
+          runbook: "Look at cqp_findings_total by rule. If one rule jumped after a release, switch it off: POST /v1/kill-switches."
+
+      - alert: DeadLetterGrowing
+        expr: increase(cqp_store_events_total{result="dlq"}[15m]) > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} reports could not be read and were parked"
+          runbook: "They count as missing evidence. Read cqp.signals.dlq, fix the parser, replay."
+
+      - alert: DecisionEventsNotPublished
+        expr: increase(cqp_decision_publish_failures_total[10m]) > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "Decision events are not reaching Kafka"
+          runbook: "Decisions still work; MR comments and gate resumes lag. Check Kafka."
+
+      - alert: NotifierFailing
+        expr: increase(cqp_notifications_total{result="error"}[10m]) > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "The notifier can't reach {{ $labels.target }}"
+          runbook: "MR comments, statuses or Slack messages are delayed. Check the token and the target's status."
+
+      - alert: GateJobsPilingUp
+        expr: cqp_waiting_gate_jobs > 50
+        for: 30m
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} gate jobs are waiting on evidence"
+          runbook: "A long-running check is probably not reporting. Find the common missing check."
+
+      - alert: BreakGlassUsed
+        expr: increase(cqp_break_glass_total[1h]) > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "Break-glass was used at {{ $labels.stage }}"
+          runbook: "Review within one business day: link the incident, check the change, close the follow-up ticket."
+
+      - alert: RuleSwitchedOffTooLong
+        expr: cqp_kill_switches_active > 0
+        for: 4h
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} rules have been switched off for over 4 hours"
+          runbook: "Fix the rule and release it, then clear the kill switch (GET /v1/kill-switches)."

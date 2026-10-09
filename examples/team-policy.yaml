@@ -1,0 +1,17 @@
+# A team policy file, kept in the service's repo as .quality/policy.yaml.
+# `cqp policy check` validates it on the MR; `cqp policy publish` makes it live from the default branch.
+# Teams can add checks and tighten rules. Locked baseline rules (security, contracts) can't be loosened.
+
+# Also wait for these checks before deciding.
+extra_checks:
+  integration:
+    tests.e2e: {deadline: 45, on_missing: warn}   # minutes
+
+# Effect of a failing check, per stage (warn | validate | block).
+on_fail:
+  tests.e2e: {integration: block}       # stricter than the baseline's validate
+  static.quality: {build: validate}
+
+# Limits on measurements.
+thresholds:
+  perf.load: {max: 150, effect: validate}   # p95 latency, ms

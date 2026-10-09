@@ -1,0 +1,74 @@
+# promtool unit tests: each alert fires on bad data and stays quiet on good data.
+# Run: docker run --rm -v "$PWD/ops/prometheus:/p" --entrypoint promtool prom/prometheus test rules /p/alerts_test.yml
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+
+tests:
+  - name: a service that stops responding pages after 2 minutes
+    input_series:
+      - series: 'up{job="cqp", instance="decision-api:8090"}'
+        values: "1 1 0 0 0 0"
+    alert_rule_test:
+      - {eval_time: 3m, alertname: CQPServiceDown, exp_alerts: []}
+      - eval_time: 5m
+        alertname: CQPServiceDown
+        exp_alerts:
+          - exp_labels: {severity: page, job: cqp, instance: "decision-api:8090"}
+            exp_annotations:
+              summary: "decision-api:8090 is not responding"
+              runbook: "Gates fall back to baseline-only checks while it is down. Check its logs and restarts."
+
+  - name: slow decisions page, fast ones don't
+    input_series:
+      # 10 requests a minute, all slower than 1s (all land in the 2.5s bucket and above).
+      - {series: 'cqp_decision_seconds_bucket{le="1"}', values: "0+0x20"}
+      - {series: 'cqp_decision_seconds_bucket{le="2.5"}', values: "0+10x20"}
+      - {series: 'cqp_decision_seconds_bucket{le="+Inf"}', values: "0+10x20"}
+    alert_rule_test:
+      - {eval_time: 8m, alertname: DecisionLatencyHigh, exp_alerts: []}
+      - eval_time: 20m
+        alertname: DecisionLatencyHigh
+        exp_alerts:
+          - exp_labels: {severity: page}
+            exp_annotations:
+              summary: "Decision p99 latency is 2.485s (SLO: under 1s)"
+              runbook: "Gates time out after 5s and fall back. Check slow queries and OPA response time."
+
+  - name: an unreadable report opens a ticket
+    input_series:
+      - {series: 'cqp_store_events_total{result="dlq"}', values: "0 0 1 1"}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: DeadLetterGrowing, exp_alerts: []}
+      - eval_time: 3m
+        alertname: DeadLetterGrowing
+        exp_alerts:
+          - exp_labels: {severity: ticket, result: dlq}
+            exp_annotations:
+              summary: "1 reports could not be read and were parked"
+              runbook: "They count as missing evidence. Read cqp.signals.dlq, fix the parser, replay."
+
+  - name: a bad rule that blocks most decisions pages
+    input_series:
+      - {series: 'cqp_decisions_total{stage="pr", status="final", outcome="BLOCKED"}', values: "0+9x60"}
+      - {series: 'cqp_decisions_total{stage="pr", status="final", outcome="PROCEED"}', values: "0+1x60"}
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: TooManyBlocks
+        exp_alerts:
+          - exp_labels: {severity: page}
+            exp_annotations:
+              summary: "90% of decisions are blocked"
+              runbook: "Look at cqp_findings_total by rule. If one rule jumped after a release, switch it off: POST /v1/kill-switches."
+
+  - name: break-glass opens a review ticket
+    input_series:
+      - {series: 'cqp_break_glass_total{stage="prod-deploy"}', values: "0 0 1 1"}
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: BreakGlassUsed
+        exp_alerts:
+          - exp_labels: {severity: ticket, stage: prod-deploy}
+            exp_annotations:
+              summary: "Break-glass was used at prod-deploy"
+              runbook: "Review within one business day: link the incident, check the change, close the follow-up ticket."

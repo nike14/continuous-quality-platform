@@ -1,0 +1,39 @@
+# Golden-path step. Extend it in any job that produces reports, and set
+# CQP_CHECK, CQP_FORMAT and CQP_FILES in that job. CQP_URL is a group-level variable.
+.quality-report:
+  id_tokens:
+    CQP_TOKEN:
+      aud: cqp
+  after_script:
+    - cqp report --check "$CQP_CHECK" --format "$CQP_FORMAT" --files "$CQP_FILES"
+  artifacts:
+    when: always            # keep reports even if the upload failed, for backfill
+    paths:
+      - .cqp/
+      - $CQP_FILES
+
+# Golden-path gate. Extend it once per stage and set CQP_STAGE (pr, build, integration).
+# prod-deploy is asked by the deploy system's own pipeline (policy/trust.yaml), not the service's.
+# Exit codes: 0 proceed (or warn), 1 blocked, 2 needs validation (approval or more evidence).
+.quality-gate:
+  id_tokens:
+    CQP_TOKEN:
+      aud: cqp
+  script:
+    - cqp gate --stage "$CQP_STAGE"
+
+# Team policy (.quality/policy.yaml). On an MR: validate it and show which recent decisions
+# would change. On the default branch (protected): publish it.
+quality-policy:
+  id_tokens:
+    CQP_TOKEN:
+      aud: cqp
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: [.quality/policy.yaml]
+      variables: {CQP_POLICY_ACTION: check}
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: [.quality/policy.yaml]
+      variables: {CQP_POLICY_ACTION: publish}
+  script:
+    - cqp policy "$CQP_POLICY_ACTION"

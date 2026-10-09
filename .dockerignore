@@ -1,0 +1,8 @@
+# Kept out of the image: local state, caches and tests (the image only runs the services).
+.venv
+.pytest_cache
+__pycache__
+.cqp
+raw
+dev
+tests

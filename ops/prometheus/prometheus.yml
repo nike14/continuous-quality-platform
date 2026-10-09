@@ -1,0 +1,13 @@
+# Prometheus for the local stack: scrapes the four CQP services and evaluates alerts.yml.
+# Alertmanager isn't wired up; firing alerts show at http://localhost:9090/alerts.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: cqp
+    static_configs:
+      - targets: ["ingestion-api:8080", "decision-api:8090", "store-worker:9100", "notifier:9100"]

@@ -1,0 +1,12 @@
+# Local gateway, standing in for the load balancer. One URL (CQP_URL) for everything:
+# decisions, policies, overrides and the portal go to the Decision API; uploads and webhooks
+# go to the ingestion API.
+:8080 {
+	@decide path /v1/decisions* /v1/team-policies* /v1/waivers* /v1/kill-switches* /portal*
+	handle @decide {
+		reverse_proxy decision-api:8090
+	}
+	handle {
+		reverse_proxy ingestion-api:8080
+	}
+}

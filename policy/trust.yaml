@@ -1,0 +1,4 @@
+# Projects that may ask for prod-deploy decisions: the deploy system only, never a service's own
+# pipeline. Their tokens must also come from a protected branch.
+deployers:
+  - platform/deployer
