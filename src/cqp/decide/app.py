@@ -49,7 +49,9 @@ class DecisionRequest(BaseModel):
     image: str | None = None
     event_ids: list[str] = []
     merge_request: int | None = None  # only used to know where to post the MR comment
-    fix: bool = False  # a fix may go out during an incident or with no error budget left
+    # A fix may go out during an incident or with no error budget left. It must name its
+    # ticket, which is recorded and shown, so claiming "fix" is never silent.
+    fix_ticket: str | None = Field(default=None, min_length=1)
 
 
 class WaiverRequest(BaseModel):
@@ -143,6 +145,14 @@ def create_app(
         with connect() as conn, conn.transaction():
             first = db.first_asked(conn, req.service, subject, req.stage) or now
             evidence = latest(conn, req.service, req.image, commit=commit)
+            # A result past its max age (a scan from last month) doesn't count; it's missing.
+            stale = {
+                check
+                for check, e in evidence.items()
+                if (age := policy.max_age(check))
+                and now - datetime.fromisoformat(e["observed_at"]) > age
+            }
+            evidence = {c: e for c, e in evidence.items() if c not in stale}
             # The caller's own uploads may still be on their way through Kafka. Wait for them
             # for the first minute only; after that a lost upload is missing, not a reason to wait.
             in_flight = [] if now - first > IN_FLIGHT_GRACE else db.not_stored(conn, req.event_ids)
@@ -153,6 +163,7 @@ def create_app(
                 **policy.expected(req.stage, tier),
             }
             waiting, missing = completeness(expected, evidence, first, now)
+            missing = [{**m, "stale": True} if m["check"] in stale else m for m in missing]
             glass = db.break_glass(conn, req.service, subject, req.stage, now)
             if glass:
                 # Under break-glass nobody waits: whatever hasn't reported counts as missing now.
@@ -177,12 +188,27 @@ def create_app(
             if req.stage == "prod-deploy":
                 # Production state is part of the input, so a replay sees exactly what we saw.
                 policy_input["runtime"] = db.runtime(conn, req.service, now)
-                policy_input["fix"] = req.fix
+                policy_input["fix"] = req.fix_ticket is not None
+                policy_input["fix_ticket"] = req.fix_ticket
 
             # Never decide on half the evidence: report what we're waiting for instead.
             # A pending answer still says REQUIRE_VALIDATION,
             # so a gate that stops polling won't proceed.
             pending = bool(in_flight or waiting)
+            all_waiting = waiting + [{"event_id": e} for e in in_flight]
+            job_id = str(claims["job_id"]) if claims.get("job_id") is not None else None
+            if pending:
+                # The gate polls every few seconds. If this job is still waiting on exactly the
+                # same things, hand back the same decision: no new row, MR edit or status post.
+                prev = db.latest_decision(conn, req.service, subject, req.stage)
+                if (
+                    prev is not None
+                    and prev["status"] == "pending"
+                    and prev["job_id"] == job_id
+                    and prev["waiting"] == all_waiting
+                    and prev["policy_version"] == policy.version
+                ):
+                    return prev
             findings = [] if pending else policy.evaluate(policy_input)
             decision = {
                 "decision_id": uuid.uuid4().hex,
@@ -192,10 +218,11 @@ def create_app(
                 "status": "pending" if pending else "final",
                 "outcome": "REQUIRE_VALIDATION" if pending else outcome(findings),
                 "findings": findings,
-                "waiting": waiting + [{"event_id": e} for e in in_flight],
+                "waiting": all_waiting,
                 "input": policy_input,
                 "policy_version": policy.version,
                 "created_at": now,
+                "job_id": job_id,
             }
             db.insert(conn, decision)
 
@@ -420,12 +447,17 @@ def backtest(conn, policy: Policy, service: str, team: dict) -> dict:
 
 
 def replay(connect: Callable, policy: Policy, decision_id: str) -> bool:
-    """Re-evaluates a stored decision on its own snapshot. True if it gives the same outcome."""
+    """Re-evaluates a stored decision on its own snapshot and rules. True if the outcome matches."""
     with connect() as conn:
         d = db.get(conn, decision_id)
-    if d is None:
-        raise LookupError(f"no decision {decision_id}")
-    if d["policy_version"] != policy.version:
-        raise ValueError(f"decision used policy {d['policy_version']}, loaded {policy.version}")
+        if d is None:
+            raise LookupError(f"no decision {decision_id}")
+        version = d["policy_version"]
+        # Older decisions are replayed on the rules they were made with, not today's.
+        rego = "" if version == policy.version else db.policy_rego(conn, version)
+    if rego is None:
+        raise ValueError(f"decision used policy {version}, which was never stored")
     # A pending decision never ran the rules, so there is nothing to compare.
-    return d["status"] == "pending" or outcome(policy.evaluate(d["input"])) == d["outcome"]
+    if d["status"] == "pending":
+        return True
+    return outcome(policy.evaluate(d["input"], version=version, rego=rego)) == d["outcome"]

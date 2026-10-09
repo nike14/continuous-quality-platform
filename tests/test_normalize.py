@@ -1,9 +1,12 @@
 """Turning each report format into one standard signal. Pure functions, no Kafka or database."""
 
+import contextlib
 import json
 
 import pytest
 from cqp.store.normalize import BadEventError, normalize
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 # One failure, one pass, one skipped.
 JUNIT = b"""<testsuite>
@@ -114,3 +117,81 @@ def test_production_events_are_health_signals():
         event("runtime", "runtime.slo", {"status": "fail", "error_budget_remaining": 0}), None
     )
     assert (s["kind"], s["status"]) == ("health", "fail")
+
+
+# ---- Real-world shapes and hostile input ----
+
+NESTED_JUNIT = b"""<testsuites>
+  <testsuite name="a"><testcase classname="A" name="one"><error/></testcase></testsuite>
+  <testsuite name="b"><testsuite name="b.inner"><testcase classname="B" name="two"/></testsuite>
+  </testsuite>
+</testsuites>"""
+
+
+def test_junit_with_nested_suites_counts_every_test():
+    s = normalize(event("junit"), files(NESTED_JUNIT))
+    assert s["payload"]["total"] == 2 and s["payload"]["failing"] == ["A.one"]
+
+
+def test_sarif_across_several_files_and_runs_is_added_up():
+    run = {"results": [{"ruleId": "r", "level": "error"}]}
+    two_runs = json.dumps({"runs": [run, run]}).encode()
+
+    def read(ref):
+        return [("a.sarif", two_runs), ("b.sarif", two_runs)]
+
+    s = normalize(event("sarif", "static.quality"), read)
+    assert s["payload"]["by_level"] == {"error": 4}
+
+
+def test_cyclonedx_without_ratings_counts_as_unknown_severity():
+    sbom = json.dumps({"vulnerabilities": [{"id": "CVE-1"}, {"id": "CVE-2", "ratings": []}]})
+    s = normalize(event("cyclonedx", "scan.sca"), files(sbom.encode()))
+    assert s["status"] == "pass" and s["payload"]["by_severity"] == {"unknown": 2}
+
+
+# Any bytes at all, in any format: normalize either reads them or raises BadEventError (which
+# parks the event). Anything else would crash the store worker on the same message forever.
+@settings(max_examples=300, deadline=None)
+@given(
+    fmt=st.sampled_from(["junit", "sarif", "cyclonedx", "k6"]),
+    data=st.one_of(
+        st.binary(max_size=200),
+        st.from_regex(rb"\{.{0,80}\}", fullmatch=True),
+        st.recursive(
+            st.none() | st.booleans() | st.integers() | st.text(max_size=5),
+            lambda c: st.lists(c, max_size=3)
+            | st.dictionaries(
+                st.sampled_from(
+                    [
+                        "runs",
+                        "results",
+                        "level",
+                        "vulnerabilities",
+                        "ratings",
+                        "severity",
+                        "metrics",
+                        "http_req_duration",
+                        "values",
+                        "p(95)",
+                        "fingerprints",
+                        "id",
+                    ]
+                ),
+                c,
+                max_size=3,
+            ),
+            max_leaves=12,
+        ).map(lambda v: json.dumps(v).encode()),
+    ),
+)
+def test_any_input_is_read_or_parked_never_a_crash(fmt, data):
+    with contextlib.suppress(BadEventError):
+        normalize(event(fmt), files(data))
+
+
+@pytest.mark.parametrize("fmt, data", [("cyclonedx", b"null"), ("sarif", b'{"runs": [1]}')])
+def test_json_of_the_wrong_shape_is_parked(fmt, data):
+    # Regression (found by the test above): these raised AttributeError and crashed the worker.
+    with pytest.raises(BadEventError):
+        normalize(event(fmt), files(data))

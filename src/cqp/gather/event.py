@@ -35,11 +35,15 @@ class ReportMeta(BaseModel):
     image: str | None = None
 
 
-def event_id(producer: str, check: str, service: str, commit: str, run: str) -> str:
+def event_id(
+    producer: str, check: str, service: str, commit: str, run: str, content: str = ""
+) -> str:
     """A stable ID for one result from one run."""
     # Same upload sent twice gets the same ID, so it is stored once downstream.
     # A retried CI job has a new job ID (run), so its result counts as new evidence.
-    return hashlib.sha256(f"{producer}|{check}|{service}|{commit}|{run}".encode()).hexdigest()
+    # content (a hash of the files) keeps two different reports from one job apart.
+    key = f"{producer}|{check}|{service}|{commit}|{run}|{content}"
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 def raw_event(
@@ -53,10 +57,11 @@ def raw_event(
     repo: str | None = None,
     image: str | None = None,
     payload: dict | None = None,
+    content: str = "",
 ) -> dict:
     """Builds the event that goes on the raw Kafka topic."""
     return {
-        "event_id": event_id(producer, check, service, commit, run),
+        "event_id": event_id(producer, check, service, commit, run, content),
         "producer": producer,
         "service": service,
         "check": check,

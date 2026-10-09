@@ -23,6 +23,16 @@ CREATE TABLE IF NOT EXISTS decisions (
     created_at     timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS decisions_by_subject ON decisions (service, subject, stage, created_at);
+-- The CI job that asked, so a repeat poll from the same job can reuse its pending decision.
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS job_id text;
+
+-- Every baseline the Decision API has run with,
+-- so an old decision can be replayed on its own rules.
+CREATE TABLE IF NOT EXISTS policy_versions (
+    version  text PRIMARY KEY,
+    rego     text NOT NULL,
+    saved_at timestamptz NOT NULL DEFAULT now()
+);
 
 -- Every published version is kept, so a decision's team_policy_version can be looked up later.
 CREATE TABLE IF NOT EXISTS team_policies (
@@ -106,8 +116,8 @@ def insert(conn, d: dict) -> None:
     # The full input is stored with it; that's what makes replay possible.
     conn.execute(
         """INSERT INTO decisions (decision_id, service, subject, stage, status, outcome, findings,
-                                  waiting, input, policy_version, created_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                  waiting, input, policy_version, created_at, job_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             d["decision_id"],
             d["service"],
@@ -120,8 +130,33 @@ def insert(conn, d: dict) -> None:
             Jsonb(d["input"]),
             d["policy_version"],
             d["created_at"],
+            d.get("job_id"),
         ),
     )
+
+
+def save_policy_version(conn, version: str, rego: str) -> None:
+    """Keeps this baseline's Rego. Saving the same version again changes nothing."""
+    conn.execute(
+        "INSERT INTO policy_versions (version, rego) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (version, rego),
+    )
+
+
+def policy_rego(conn, version: str) -> str | None:
+    """The Rego a stored baseline version ran with, or None if it was never saved."""
+    row = conn.execute("SELECT rego FROM policy_versions WHERE version = %s", (version,)).fetchone()
+    return row[0] if row else None
+
+
+def latest_decision(conn, service: str, subject: str, stage: str) -> dict | None:
+    """The newest decision for this change and stage, or None."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(
+            """SELECT * FROM decisions WHERE service = %s AND subject = %s AND stage = %s
+               ORDER BY created_at DESC LIMIT 1""",
+            (service, subject, stage),
+        ).fetchone()
 
 
 def get(conn, decision_id: str) -> dict | None:

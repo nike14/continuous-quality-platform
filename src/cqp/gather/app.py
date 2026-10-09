@@ -3,6 +3,7 @@
 Verify the sender, keep the raw file, publish, acknowledge.
 """
 
+import hashlib
 import json
 from collections.abc import Callable
 from typing import Annotated
@@ -19,12 +20,21 @@ Publish = Callable[[str, str, dict], None]  # (topic, key, event)
 Store = Callable[[str, list[tuple[str, bytes]]], str]  # (event_id, files) -> raw_ref
 
 
+def digest(files: list[tuple[str, bytes]]) -> str:
+    """A hash of an upload's names and bytes: the same upload twice gives the same value."""
+    h = hashlib.sha256()
+    for name, data in files:
+        h.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
+    return h.hexdigest()
+
+
 def create_app(
     verify_token: Callable[[str], dict],
     publish: Publish,
     store: Store,
     webhook_secrets: dict[str, str],
     owns: Callable[[str, str], bool],
+    max_upload_bytes: int = 50 * 1024 * 1024,
 ) -> FastAPI:
     """Builds the ingestion API.
 
@@ -69,6 +79,17 @@ def create_app(
                 "ci", "rejected_owner", 403, f"{claims['project_path']} doesn't own {m.service}"
             )
 
+        saved, total = [], 0
+        for f in files:
+            # Read at most one byte past the limit, so an oversized upload is never held whole.
+            data = await f.read(max_upload_bytes - total + 1)
+            total += len(data)
+            if total > max_upload_bytes:
+                limit_mb = max_upload_bytes // (1024 * 1024)
+                raise reject(
+                    "ci", "rejected_too_large", 413, f"reports over {limit_mb} MB in total"
+                )
+            saved.append((f.filename or "", data))  # the store names unnamed parts
         # Identity comes from the verified token, never from what the job sent.
         event = raw_event(
             producer=f"ci:{claims['project_path']}",
@@ -79,9 +100,9 @@ def create_app(
             commit=claims["sha"],
             run=str(claims["job_id"]),
             image=m.image,
+            content=digest(saved),
         )
         # Files first: the event only points at them, and the store worker reads them back.
-        saved = [(f.filename or "", await f.read()) for f in files]  # the store names unnamed parts
         event["raw_ref"] = store(event["event_id"], saved)
         event_id = emit(event)
         INGESTED.labels("ci", "accepted").inc()

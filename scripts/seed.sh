@@ -114,7 +114,7 @@ slo payments-api 0.42
 incident payments-api "INC-$RANDOM" open
 prod_ready payments-api "sha256:payments-$RANDOM"
 gate prod-deploy
-CQP_TOKEN="$(deployer)" cqp gate --service payments-api --stage prod-deploy --fix 2>&1 | head -1
+CQP_TOKEN="$(deployer)" cqp gate --service payments-api --stage prod-deploy --fix "INC-$RANDOM" 2>&1 | head -1
 incident payments-api "INC-resolved-$RANDOM" resolved
 
 echo "-- Production: error budget used up needs approval"

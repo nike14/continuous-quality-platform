@@ -74,7 +74,7 @@ HEALTHY = {
 }
 
 
-def prod(policy, fix=False, tier="tier-1", **runtime):
+def prod(policy, fix=None, tier="tier-1", **runtime):
     return [
         (f["rule"], f["effect"])
         for f in policy.evaluate(
@@ -84,7 +84,8 @@ def prod(policy, fix=False, tier="tier-1", **runtime):
                 "evidence": {},
                 "missing": [],
                 "runtime": {**HEALTHY, **runtime},
-                "fix": fix,
+                "fix": fix is not None,
+                "fix_ticket": fix,
             }
         )
     ]
@@ -97,12 +98,14 @@ def test_healthy_production_adds_no_findings(policy):
 def test_no_error_budget_or_an_incident_needs_approval_unless_it_is_a_fix(policy):
     assert prod(policy, error_budget_remaining=0) == [("baseline.error_budget", "validate")]
     assert prod(policy, incident="sev1") == [("baseline.active_incident", "validate")]
-    assert prod(policy, fix=True, error_budget_remaining=0, incident="sev1") == []
+    # A fix gets through both, but always with a visible warning naming its ticket.
+    fixed = prod(policy, fix="INC-7", error_budget_remaining=0, incident="sev1")
+    assert fixed == [("baseline.fix_release", "warn")]
 
 
 def test_recent_rollback_warns_and_a_freeze_blocks(policy):
     assert prod(policy, rolled_back_recently=True) == [("baseline.recent_rollback", "warn")]
-    assert prod(policy, freeze=True, fix=True) == [("baseline.change_freeze", "block")]
+    assert ("baseline.change_freeze", "block") in prod(policy, freeze=True, fix="INC-7")
 
 
 def test_stale_health_needs_approval_for_tier_1_only(policy):
@@ -262,3 +265,21 @@ def test_kill_switch_and_break_glass_requests_are_checked(policy):
         "a kill switch lasts at most 72 hours"
     ]
     assert policy.break_glass_errors(None) != [] and policy.break_glass_errors("oncall") == []
+
+
+# ---- OPA losing its rules ----
+
+
+def test_rules_lost_by_an_opa_restart_are_reloaded_not_read_as_no_findings(policy):
+    # Regression: an empty answer from OPA used to mean "no findings", so everything proceeded.
+    policy._opa.delete("/v1/policies/cqp-baseline").raise_for_status()  # what a restart does
+    [f] = run(policy, "pr", UNIT_FAIL)
+    assert f["effect"] == "block"
+
+
+def test_rules_that_cannot_be_loaded_raise_instead_of_proceeding(opa_url, monkeypatch):
+    p = Policy(POLICY_DIR, opa_url)
+    p._opa.delete("/v1/policies/cqp-baseline").raise_for_status()
+    monkeypatch.setattr(p, "install", lambda: None)  # and reloading them doesn't work
+    with pytest.raises(RuntimeError, match="no cqp/baseline/findings"):
+        p.evaluate({"stage": "pr", "evidence": UNIT_FAIL, "missing": []})

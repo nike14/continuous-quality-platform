@@ -110,3 +110,17 @@ def test_a_refused_request_fails_the_job_instead_of_falling_back(capsys):
     client = httpx.Client(transport=httpx.MockTransport(handler))
     assert run(client, "pr") == 1 and len(calls) == 1  # no retries, no "continuing"
     assert "doesn't own checkout-web" in capsys.readouterr().err
+
+
+def test_a_fix_sends_its_ticket():
+    client, calls = cqp_answering(decision())
+    gate(
+        "payments-api",
+        "prod-deploy",
+        "https://cqp",
+        "tok",
+        client,
+        sleep=lambda s: None,
+        fix_ticket="INC-7",
+    )
+    assert b'"fix_ticket":"INC-7"' in calls[0].content.replace(b" ", b"")

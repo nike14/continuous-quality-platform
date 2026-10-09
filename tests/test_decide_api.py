@@ -8,6 +8,7 @@ from datetime import timedelta
 import psycopg
 import pytest
 from conftest import CLAIMS, POLICY_DIR, T0, fake_verify
+from cqp.decide import db as decide_db
 from cqp.decide.app import create_app, replay
 from cqp.decide.policy import Policy
 from cqp.store.db import save
@@ -18,7 +19,7 @@ IMAGE = "sha256:ab12"
 
 
 # Puts a stored signal in place, as if it had come through Kafka and the store worker.
-def record(conn, check, status="pass", payload=None, image=None):
+def record(conn, check, status="pass", payload=None, image=None, at="2026-10-07T09:00:00Z"):
     save(
         conn,
         {
@@ -33,7 +34,7 @@ def record(conn, check, status="pass", payload=None, image=None):
             "producer": "ci",
             "payload": payload or {},
             "raw_ref": None,
-            "observed_at": "2026-10-07T09:00:00Z",
+            "observed_at": at,
         },
     )
     # Committed, because the API reads through its own connection.
@@ -229,7 +230,9 @@ def test_open_incident_needs_approval_but_a_fix_goes_out(setup, conn, ready_for_
     )
     assert ask(api, "prod-deploy", image=IMAGE)["outcome"] == "REQUIRE_VALIDATION"
     # A fix still goes out during an incident; that's how incidents get resolved.
-    assert ask(api, "prod-deploy", image=IMAGE, fix=True)["outcome"] == "PROCEED"
+    fixed = ask(api, "prod-deploy", image=IMAGE, fix_ticket="INC-7")
+    assert fixed["outcome"] == "PROCEED_WITH_WARNING"
+    assert "released as a fix under INC-7" in fixed["findings"][0]["message"]
 
 
 def test_failed_canary_in_the_last_day_warns(setup, conn, ready_for_prod):
@@ -342,3 +345,105 @@ def test_replaying_an_unknown_decision_says_so(setup):
     _, connect, policy = setup
     with pytest.raises(LookupError, match="no decision"):
         replay(connect, policy, "nope")
+
+
+def test_repeat_polls_from_one_job_reuse_the_pending_decision(setup, conn, published):
+    # Regression: each 5s poll stored a new decision and re-posted the MR comment and status.
+    api, _, _ = setup
+    record(conn, "tests.integration")  # perf.load (2h deadline) still running
+    ids = {ask(api, "integration")["decision_id"] for _ in range(3)}
+    assert len(ids) == 1 and len(published) == 1
+    assert conn.execute("SELECT count(*) FROM decisions").fetchone()[0] == 1
+
+
+def test_a_retried_job_gets_its_own_pending_decision(setup, conn, published):
+    # The notifier needs the new job's ID to resume it, so a different job must be published.
+    api, _, _ = setup
+    record(conn, "tests.integration")
+    first = ask(api, "integration")
+    r = api.post(
+        "/v1/decisions",
+        json={"service": "payments-api", "stage": "integration"},
+        headers={"Authorization": "Bearer retried-job-token"},
+    )
+    assert r.json()["decision_id"] != first["decision_id"] and len(published) == 2
+
+
+def test_a_poll_after_the_evidence_lands_is_a_new_final_decision(setup, conn, now):
+    api, _, _ = setup
+    record(conn, "tests.integration")
+    pending = ask(api, "integration")
+    record(conn, "perf.load", payload={"metric": "p95_ms", "value": 200, "unit": "ms"})
+    final = ask(api, "integration")
+    assert final["status"] == "final" and final["decision_id"] != pending["decision_id"]
+
+
+def stored_decision(conn, version, outcome_):
+    """A PR decision on a failing unit test, as an older Decision API would have stored it."""
+    decide_db.insert(
+        conn,
+        {
+            "decision_id": f"old-{version}",
+            "service": "payments-api",
+            "subject": CLAIMS["sha"],
+            "stage": "pr",
+            "status": "final",
+            "outcome": outcome_,
+            "findings": [],
+            "waiting": [],
+            "input": {
+                "stage": "pr",
+                "evidence": {
+                    "tests.unit": {
+                        "kind": "outcome",
+                        "status": "fail",
+                        "payload": {"failing": ["A.b"]},
+                    }
+                },
+                "missing": [],
+            },
+            "policy_version": version,
+            "created_at": T0,
+        },
+    )
+    conn.commit()
+
+
+def test_an_old_decision_replays_on_the_rules_it_was_made_with(setup, conn):
+    # Regression: replay refused anything made under a previous baseline.
+    _, connect, policy = setup
+    # The old baseline only warned on failing unit tests at PR; today's blocks.
+    old_rego = policy.rego.replace('"tests.unit": {"pr": "block"', '"tests.unit": {"pr": "warn"', 1)
+    assert old_rego != policy.rego
+    decide_db.save_policy_version(conn, "oldbaseline1", old_rego)
+    stored_decision(conn, "oldbaseline1", "PROCEED_WITH_WARNING")
+    assert replay(connect, policy, "old-oldbaseline1")
+
+
+def test_replaying_a_decision_whose_rules_were_never_stored_says_so(setup, conn):
+    _, connect, policy = setup
+    stored_decision(conn, "neverstored1", "BLOCKED")
+    with pytest.raises(ValueError, match="never stored"):
+        replay(connect, policy, "old-neverstored1")
+
+
+def test_a_security_scan_older_than_its_max_age_counts_as_missing(setup, conn, ready_for_prod):
+    # Regression: a month-old scan used to count at the production gate.
+    api, _, _ = setup
+    # Swap the fresh scan for one from 30 days ago (same event ID, so delete first).
+    conn.execute("DELETE FROM signals WHERE check_name = 'scan.sca'")
+    record(conn, "scan.sca", image=IMAGE, at=(T0 - timedelta(days=30)).isoformat())
+    d = ask(api, "prod-deploy", image=IMAGE)
+    assert d["outcome"] == "BLOCKED"
+    assert any("scan.sca result is too old" in f["message"] for f in d["findings"])
+
+
+def test_a_scan_inside_its_max_age_still_counts(setup, conn, ready_for_prod):
+    api, _, _ = setup
+    assert ask(api, "prod-deploy", image=IMAGE)["outcome"] == "PROCEED"
+
+
+def test_a_fix_without_a_ticket_is_refused(setup):
+    api, _, _ = setup
+    body = {"service": "payments-api", "stage": "prod-deploy", "image": IMAGE, "fix_ticket": ""}
+    assert api.post("/v1/decisions", json=body, headers=DEPLOY).status_code == 422

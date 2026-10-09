@@ -37,4 +37,5 @@ app = create_app(
     store=local_store(Path(os.environ.get("CQP_RAW_DIR", "raw"))),
     webhook_secrets=json.loads(os.environ.get("CQP_WEBHOOK_SECRETS", "{}")),
     owns=Catalog(Path(os.environ.get("CQP_POLICY_DIR", "policy"))).owns,
+    max_upload_bytes=int(os.environ.get("CQP_MAX_UPLOAD_MB", "50")) * 1024 * 1024,
 )

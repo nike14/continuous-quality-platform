@@ -1,0 +1,28 @@
+# CI for CQP itself. (The golden-path templates teams include are in ci/, not here.)
+stages: [lint, test]
+
+default:
+  image: python:3.12-slim
+  before_script:
+    - pip install --quiet uv==0.12.1
+    - uv sync --frozen
+
+lint:
+  stage: lint
+  script:
+    - uv run --with ruff==0.4.4 ruff check src tests scripts
+    - uv run --with ruff==0.4.4 ruff format --check src tests scripts
+    - uv run --with mypy==1.10.0 mypy src tests scripts
+
+# Postgres and OPA run as throwaway containers, so the job needs Docker. CQP_REQUIRE_DOCKER
+# turns "Docker missing, tests skipped" into a failure instead of a green pipeline.
+test:
+  stage: test
+  services: ["docker:27-dind"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    TESTCONTAINERS_HOST_OVERRIDE: docker
+    CQP_REQUIRE_DOCKER: "1"
+  script:
+    - uv run pytest -q

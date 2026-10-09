@@ -75,14 +75,31 @@ def latest(
 ) -> dict[str, dict]:
     """Newest result per check for an image (including results on its commit) or a bare commit."""
     # A result can be about the image (scans), the commit (tests), or the commit the image was
-    # built from. Newest per check wins, so a passing re-run replaces an earlier failure.
+    # built from. The newest run per check wins, so a passing re-run replaces an earlier failure.
+    # One run may send several reports for a check (two test modules): any failure among them wins.
     rows = conn.execute(
-        """SELECT DISTINCT ON (check_name) check_name, kind, status, payload, event_id
-           FROM signals s
-           WHERE s.service = %s
-             AND (s.image = %s OR s.commit = %s
-                  OR s.commit IN (SELECT commit FROM builds WHERE service = %s AND image = %s))
-           ORDER BY check_name, observed_at DESC""",
+        """WITH matching AS (
+             SELECT check_name, kind, status, payload, event_id, run, producer, observed_at,
+                    first_value(run) OVER newest AS newest_run,
+                    first_value(producer) OVER newest AS newest_producer
+             FROM signals s
+             WHERE s.service = %s
+               AND (s.image = %s OR s.commit = %s
+                    OR s.commit IN (SELECT commit FROM builds WHERE service = %s AND image = %s))
+             WINDOW newest AS (PARTITION BY check_name ORDER BY observed_at DESC)
+           )
+           SELECT DISTINCT ON (check_name) check_name, kind, status, payload, event_id, observed_at
+           FROM matching WHERE run = newest_run AND producer = newest_producer
+           ORDER BY check_name, (status = 'fail') DESC, observed_at DESC""",
         (service, image, commit, service, image),
     ).fetchall()
-    return {r[0]: {"kind": r[1], "status": r[2], "payload": r[3], "event_id": r[4]} for r in rows}
+    return {
+        r[0]: {
+            "kind": r[1],
+            "status": r[2],
+            "payload": r[3],
+            "event_id": r[4],
+            "observed_at": r[5].isoformat(),
+        }
+        for r in rows
+    }

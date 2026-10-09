@@ -66,9 +66,13 @@ raw contains f if {
 	f := {
 		"rule": "baseline.evidence_required",
 		"effect": m.on_missing,
-		"message": sprintf("%s did not report before its deadline", [m.check]),
+		"message": missing_message(m),
 	}
 }
+
+missing_message(m) := sprintf("%s result is too old to count; run it again", [m.check]) if m.stale
+
+else := sprintf("%s did not report before its deadline", [m.check])
 
 # A team's own limit on a measurement, e.g. p95 latency.
 raw contains f if {
@@ -91,6 +95,13 @@ raw contains f if {
 	not input.fix
 	f := {"rule": "baseline.error_budget", "effect": "validate",
 	      "message": "error budget used up: only fixes go out without approval"}
+}
+
+# A fix skips the two approvals above, so it's always visible: a warning, which also goes to Slack.
+raw contains f if {
+	input.fix
+	f := {"rule": "baseline.fix_release", "effect": "warn",
+	      "message": sprintf("released as a fix under %s", [input.fix_ticket])}
 }
 
 raw contains f if {

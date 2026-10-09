@@ -63,7 +63,7 @@ def gate(
     max_wait: float = 120,
     sleep=time.sleep,
     clock=time.monotonic,
-    fix: bool = False,
+    fix_ticket: str | None = None,
 ) -> int:
     """Asks until the answer is final (or max_wait runs out) and returns the job's exit code."""
     image_file = STATE / "image-digest"
@@ -77,7 +77,7 @@ def gate(
         "merge_request": int(os.environ["CI_MERGE_REQUEST_IID"])
         if os.environ.get("CI_MERGE_REQUEST_IID")
         else None,
-        "fix": fix,
+        "fix_ticket": fix_ticket,
     }
 
     # Poll while the answer is pending, but not forever: for long checks the notifier

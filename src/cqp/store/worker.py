@@ -9,6 +9,7 @@ import psycopg
 from prometheus_client import start_http_server
 
 from cqp.gather.event import RAW_TOPIC
+from cqp.kafka import kafka_publisher
 from cqp.metrics import EVIDENCE_DELAY, STORED
 from cqp.store.db import migrate, save
 from cqp.store.normalize import BadEventError, normalize
@@ -42,9 +43,19 @@ def process(msg, conn, consumer, dlq, read_raw=read_local) -> None:
     consumer.commit(message=msg, asynchronous=False)
 
 
+def poll_once(consumer, conn, dlq) -> None:
+    """Reads at most one message and processes it. Errors propagate, so the worker restarts."""
+    msg = consumer.poll(1.0)
+    if msg is None:
+        return
+    if msg.error():
+        raise RuntimeError(msg.error())  # let the orchestrator restart us
+    process(msg, conn, consumer, dlq)
+
+
 def main() -> None:
     """Reads raw events from Kafka until stopped."""
-    from confluent_kafka import Consumer, Producer
+    from confluent_kafka import Consumer
 
     bootstrap = os.environ.get("CQP_KAFKA", "localhost:9092")
     consumer = Consumer(
@@ -55,22 +66,13 @@ def main() -> None:
             "auto.offset.reset": "earliest",
         }
     )
-    producer = Producer({"bootstrap.servers": bootstrap, "enable.idempotence": True})
-
-    def dlq(topic, key, value):
-        """Sends an unreadable event to the dead-letter topic."""
-        producer.produce(topic, key=key, value=json.dumps(value).encode())
-        # Wait for it: the offset is committed next, and an unsent DLQ event would be lost.
-        producer.flush(5)
+    # Waits for Kafka's acknowledgement and raises without it. The offset is committed only
+    # after this, so an unacknowledged DLQ write means the message is read again, not lost.
+    dlq = kafka_publisher(bootstrap)
 
     start_http_server(9100)  # /metrics for Prometheus
     with psycopg.connect(os.environ["CQP_DATABASE_URL"]) as conn:
         migrate(conn)
         consumer.subscribe([RAW_TOPIC])
         while True:
-            msg = consumer.poll(1.0)
-            if msg is None:
-                continue
-            if msg.error():
-                raise RuntimeError(msg.error())  # let the orchestrator restart us
-            process(msg, conn, consumer, dlq)
+            poll_once(consumer, conn, dlq)

@@ -119,7 +119,8 @@ def sweep(conn, gitlab: GitLabAPI, now: datetime) -> None:
     for project, job_id, service, subject, _stage, checks, deadline in db.waiting(conn):
         # subject is an image or a commit; passing it as both covers either case.
         arrived = latest(conn, service, image=subject, commit=subject)
-        if now >= deadline or all(c in arrived for c in checks):
+        # With no named checks we're only waiting on in-flight uploads, so wait for the deadline.
+        if now >= deadline or (checks and all(c in arrived for c in checks)):
             gitlab.retry_job(project, job_id)  # CI re-runs its own gate, which asks again
             db.done(conn, project, job_id)
             GATE_RETRIES.inc()
@@ -153,6 +154,18 @@ def post_to_slack(webhook: str, text: str) -> None:
     NOTIFICATIONS.labels("slack", "ok").inc()
 
 
+def poll_once(consumer, gitlab: GitLabAPI, conn, slack=None) -> None:
+    """Reads at most one decision and acts on it, then commits. Kafka errors propagate."""
+    msg = consumer.poll(1.0)
+    if msg is None:
+        return
+    if msg.error():
+        raise RuntimeError(msg.error())
+    if (d := decode(msg.value())) is not None:
+        handle(d, gitlab, conn, slack)
+    consumer.commit(message=msg, asynchronous=False)  # after the side effects
+
+
 def main() -> None:
     """Reads decisions from Kafka and runs the sweep and reminders every few seconds."""
     from confluent_kafka import Consumer
@@ -183,13 +196,7 @@ def main() -> None:
         consumer.subscribe([DECISIONS_TOPIC])
         last_sweep = 0.0
         while True:
-            msg = consumer.poll(1.0)
-            if msg is not None:
-                if msg.error():
-                    raise RuntimeError(msg.error())
-                if (d := decode(msg.value())) is not None:
-                    handle(d, gitlab, conn, slack)
-                consumer.commit(message=msg, asynchronous=False)  # after the side effects
+            poll_once(consumer, gitlab, conn, slack)
             if time.monotonic() - last_sweep >= SWEEP_SECONDS:
                 sweep(conn, gitlab, datetime.now(UTC))
                 remind(conn, slack or log.info, datetime.now(UTC))

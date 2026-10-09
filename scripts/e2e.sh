@@ -36,6 +36,12 @@ hook() {  # tool json -> HTTP status of a correctly signed webhook
   local sig; sig="$(python3 -c "import hmac,hashlib,sys; print('sha256='+hmac.new(b'local-secret', sys.argv[1].encode(), hashlib.sha256).hexdigest())" "$2")"
   curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/hooks/$1" -H "X-CQP-Signature: $sig" -d "$2"
 }
+until_sql() {  # sql expected: poll up to 30s instead of sleeping a fixed time
+  for _ in $(seq 60); do [ "$(sql "$1")" == "$2" ] && return 0; sleep 0.5; done; return 1
+}
+stored() {  # service check run: wait until that result is in Postgres
+  until_sql "select count(*) from signals where service = '$1' and check_name = '$2' and run = '$3'" 1
+}
 wait_api() { for _ in $(seq 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/decisions/x")" == "404" ] && return; sleep 1; done; }
 
 echo "== gather → store → decide"
@@ -62,7 +68,7 @@ print(replay(pool.connection, policy, '$blocked_id'))" 2>/dev/null | tail -1)"
 workspace; export CQP_TOKEN="$(token "$(newsha)")"
 upload tests.unit junit "$JUNIT_PASS" junit.xml
 upload tests.unit junit "$JUNIT_PASS" junit.xml   # same job uploads twice
-event="$(head -1 .cqp/events/*.txt)"; sleep 3
+event="$(head -1 .cqp/events/*.txt)"; until_sql "select count(*) from signals where event_id = '$event'" 1
 check "a duplicate upload is stored once" 1 "$(sql "select count(*) from signals where event_id = '$event'")"
 
 workspace; export CQP_TOKEN="$(token "$(newsha)")"; mkdir -p .cqp; echo "sha256:$(newsha)" > .cqp/image-digest
@@ -87,17 +93,20 @@ body="{\"provider\":\"payments-api\",\"provider_version\":\"$sha\",\"consumer\":
 sig() { python3 -c "import hmac,hashlib,sys; print('sha256='+hmac.new(sys.argv[1].encode(), sys.argv[2].encode(), hashlib.sha256).hexdigest())" "$1" "$body"; }
 check "a correctly signed Pact webhook is accepted" 202 "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/hooks/pact-broker" \
   -H "X-CQP-Signature: $(sig local-secret)" -d "$body")"
-sleep 3
+stored payments-api tests.contract "v/$sha"
 check "the webhook's contract result is stored" fail "$(sql "select status from signals where commit = '$sha' and check_name = 'tests.contract'")"
 check "a webhook with a wrong signature is rejected" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/hooks/pact-broker" \
   -H "X-CQP-Signature: $(sig wrong-secret)" -d "$body")"
 
 workspace; export CQP_TOKEN="$(token "$(newsha)")"
 upload tests.unit junit '<not xml' junit.xml
-event="$(head -1 .cqp/events/*.txt)"; sleep 4
+event="$(head -1 .cqp/events/*.txt)"
+in_dlq() { compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server kafka:9092 --topic cqp.signals.dlq --from-beginning --timeout-ms 5000 2>/dev/null | grep -c "$event"; }
+# Wait until the worker has handled it: "not stored" is trivially true before that.
+for _ in $(seq 6); do parked="$(in_dlq)"; [ "$parked" -ge 1 ] && break; done
+check "an unreadable report goes to the dead-letter topic" 1 "$parked"
 check "an unreadable report is not stored" 0 "$(sql "select count(*) from signals where event_id = '$event'")"
-check "an unreadable report goes to the dead-letter topic" 1 "$(compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh \
-  --bootstrap-server kafka:9092 --topic cqp.signals.dlq --from-beginning --timeout-ms 5000 2>/dev/null | grep -c "$event")"
 
 echo "== long checks: pending, then resumed by the notifier"
 
@@ -126,28 +135,37 @@ prod_ready() {  # every check a default-tier prod deploy expects, passing, for a
   upload scan.sca cyclonedx '{"vulnerabilities":[]}' sbom.json
   upload scan.secrets sarif "$SARIF_CLEAN" secrets.sarif
 }
-slo() { hook runtime "{\"type\":\"slo\",\"service\":\"$SERVICE\",\"error_budget_remaining\":$1,\"at\":\"$(date -u +%s)-$RANDOM\"}" >/dev/null; }
+slo() {
+  local at="$(date -u +%s)-$RANDOM"
+  hook runtime "{\"type\":\"slo\",\"service\":\"$SERVICE\",\"error_budget_remaining\":$1,\"at\":\"$at\"}" >/dev/null
+  stored "$SERVICE" runtime.slo "$at"
+}
+freeze() {  # true|false, then wait until it's stored
+  local at="$(date -u +%s)-$RANDOM"
+  hook runtime "{\"type\":\"freeze\",\"active\":$1,\"at\":\"$at\"}" >/dev/null
+  stored '*' org.freeze "$at"
+}
 outcome() { gate --stage prod-deploy "$@" >/dev/null; head -1 gate.log | awk '{print $2}'; }
 
 slo 0.5; prod_ready
 check "healthy production: deploy proceeds" PROCEED "$(outcome)"
 
 check "an incident webhook is accepted" 202 "$(hook runtime "{\"type\":\"incident\",\"service\":\"$SERVICE\",\"id\":\"INC-1\",\"severity\":\"sev1\",\"state\":\"open\"}")"
-sleep 3; prod_ready
+stored "$SERVICE" runtime.incident "INC-1:open"; prod_ready
 check "active incident: deploy needs approval" REQUIRE_VALIDATION "$(outcome)"
-check "active incident: a fix still goes out" PROCEED "$(outcome --fix)"
+check "active incident: a fix still goes out, with a warning" PROCEED_WITH_WARNING "$(outcome --fix INC-1)"
 hook runtime "{\"type\":\"incident\",\"service\":\"$SERVICE\",\"id\":\"INC-1\",\"severity\":\"sev1\",\"state\":\"resolved\"}" >/dev/null
+stored "$SERVICE" runtime.incident "INC-1:resolved"
 
+run="r-$RANDOM"
 check "a canary result from Argo Rollouts is accepted" 202 "$(hook argo-rollouts \
-  "{\"service\":\"$SERVICE\",\"commit\":\"$sha\",\"image\":\"sha256:$sha\",\"analysis_run\":\"r-$RANDOM\",\"phase\":\"Failed\"}")"
-sleep 3; slo 0.5; prod_ready
+  "{\"service\":\"$SERVICE\",\"commit\":\"$sha\",\"image\":\"sha256:$sha\",\"analysis_run\":\"$run\",\"phase\":\"Failed\"}")"
+stored "$SERVICE" deploy.canary "$run"; slo 0.5; prod_ready
 check "after a failed canary: the next deploy warns" PROCEED_WITH_WARNING "$(outcome)"
 
-hook runtime "{\"type\":\"freeze\",\"active\":true,\"at\":\"$(date -u +%s)\"}" >/dev/null
-sleep 3; prod_ready
+freeze true; prod_ready
 check "change freeze: deploy is blocked" BLOCKED "$(outcome)"
-hook runtime "{\"type\":\"freeze\",\"active\":false,\"at\":\"$(date -u +%s)-off\"}" >/dev/null
-sleep 3
+freeze false  # waited for, so the freeze can't leak into later sections
 unset SERVICE
 
 echo "== team policies and waivers"
@@ -223,14 +241,14 @@ compose start kafka >/dev/null 2>&1
 
 # Workers crashed on the outage; compose restarts them with growing back-off, so poll.
 workspace; export CQP_TOKEN="$(token "$(newsha)")"
-stored=0
+flowing=0
 for _ in $(seq 24); do
   upload tests.unit junit "$JUNIT_PASS" junit.xml
   event="$(head -1 .cqp/events/*.txt 2>/dev/null)"
-  [ -n "$event" ] && [ "$(sql "select count(*) from signals where event_id = '$event'")" == "1" ] && { stored=1; break; }
+  [ -n "$event" ] && [ "$(sql "select count(*) from signals where event_id = '$event'")" == "1" ] && { flowing=1; break; }
   sleep 5
 done
-check "after Kafka recovers, new evidence flows again" 1 "$stored"
+check "after Kafka recovers, new evidence flows again" 1 "$flowing"
 
 echo "== observability"
 

@@ -1,6 +1,7 @@
 """Shared fixtures. Fast tests use fakes (token check, Kafka, file store); the rest get a
 real Postgres and OPA in throwaway containers."""
 
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +38,7 @@ TOKENS = {
     "security-token": {**CLAIMS, "cqp_role": "security", "user_login": "secops"},
     "platform-token": {**CLAIMS, "cqp_role": "platform", "user_login": "platform-oncall"},
     "oncall-token": {**CLAIMS, "cqp_role": "oncall", "user_login": "sre"},
+    "retried-job-token": {**CLAIMS, "job_id": 4413},
     "no-sha-token": {k: v for k, v in CLAIMS.items() if k != "sha"},
     "deployer-token": {**CLAIMS, "project_path": "platform/deployer", "sha": "d" * 40},
     "deployer-branch-token": {
@@ -90,7 +92,14 @@ def client(published, stored):
 
 
 # Real Postgres and OPA in throwaway containers, shared by the whole run.
-# Skipped when Docker isn't available (on Colima, set TESTCONTAINERS_RYUK_DISABLED=true).
+# Skipped when Docker isn't available (on Colima, set TESTCONTAINERS_RYUK_DISABLED=true),
+# unless CQP_REQUIRE_DOCKER is set, as in CI: there a skipped suite must fail, not look green.
+
+
+def unavailable(what: str, error: Exception):
+    if os.environ.get("CQP_REQUIRE_DOCKER"):
+        pytest.fail(f"{what} unavailable and CQP_REQUIRE_DOCKER is set: {error}")
+    pytest.skip(f"{what} unavailable: {error}")
 
 
 @pytest.fixture(scope="session")
@@ -102,7 +111,7 @@ def pg_url():
         with PostgresContainer("postgres:16-alpine", driver=None) as pg:
             yield pg.get_connection_url()
     except Exception as e:
-        pytest.skip(f"Postgres container unavailable: {e}")
+        unavailable("Postgres container", e)
 
 
 @pytest.fixture
@@ -114,7 +123,7 @@ def conn(pg_url):
         notify_db.migrate(c)
         c.execute(
             "TRUNCATE signals, builds, decisions, waiting_pipelines, team_policies, waivers, "
-            "kill_switches, break_glass"
+            "kill_switches, break_glass, policy_versions"
         )
         c.commit()
         yield c
@@ -124,15 +133,16 @@ def conn(pg_url):
 def opa_url():
     from testcontainers.core.container import DockerContainer
 
-    opa = (
-        DockerContainer("openpolicyagent/opa:1.0.0")
-        .with_command("run --server --addr 0.0.0.0:8181")
-        .with_exposed_ports(8181)
-    )
+    # Created inside the try too: without Docker even building the container object fails.
     try:
+        opa = (
+            DockerContainer("openpolicyagent/opa:1.0.0")
+            .with_command("run --server --addr 0.0.0.0:8181")
+            .with_exposed_ports(8181)
+        )
         opa.start()
     except Exception as e:
-        pytest.skip(f"OPA container unavailable: {e}")
+        unavailable("OPA container", e)
     url = f"http://{opa.get_container_host_ip()}:{opa.get_exposed_port(8181)}"
     # OPA takes a moment to start; wait for /health before handing out the URL.
     for _ in range(50):
@@ -140,7 +150,11 @@ def opa_url():
             if httpx.get(f"{url}/health").status_code == 200:
                 break
         except httpx.HTTPError:
-            time.sleep(0.2)
+            pass
+        time.sleep(0.2)
+    else:
+        opa.stop()
+        unavailable("OPA container", TimeoutError("never became healthy"))
     yield url
     opa.stop()
 

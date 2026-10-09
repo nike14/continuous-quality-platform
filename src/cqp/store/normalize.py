@@ -92,7 +92,15 @@ def normalize(event: dict, read_raw) -> dict:
     elif event["format"] in PARSERS:
         try:
             kind, status, payload = PARSERS[event["format"]](read_raw(event["raw_ref"]))
-        except (ValueError, KeyError, TypeError, IndexError, ElementTree.ParseError) as e:
+        # AttributeError: valid JSON of the wrong shape, like a report that is just null.
+        except (
+            ValueError,
+            KeyError,
+            TypeError,
+            IndexError,
+            AttributeError,
+            ElementTree.ParseError,
+        ) as e:
             raise BadEventError(f"unreadable {event['format']} report: {e}") from e
     else:
         raise BadEventError(f"no parser for format {event['format']!r}")

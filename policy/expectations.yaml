@@ -1,6 +1,14 @@
 # Which checks each stage expects, by service tier ("default" when the tier has no entry).
 # If a check hasn't reported `deadline` minutes after the first decision request for that
 # change and stage, `on_missing` applies: warn | validate | block. Deadline 0 = must already be there.
+
+# How long a result stays usable. An older one counts as missing (and the finding says it's stale).
+# Checks not listed stay valid for the change they ran on.
+max_age_days:
+  scan.sca: 7
+  scan.container: 7
+  scan.secrets: 7
+
 pr:
   default:
     tests.unit: {deadline: 0, on_missing: warn}

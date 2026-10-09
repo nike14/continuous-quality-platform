@@ -79,3 +79,44 @@ def test_a_repo_cannot_report_for_a_service_it_does_not_own(client, published):
     r = upload(client, {"service": "checkout-web", "check": "tests.unit", "format": "junit"})
     assert r.status_code == 403 and "doesn't own checkout-web" in r.text
     assert published == []
+
+
+def test_two_different_reports_from_one_job_are_both_kept(client):
+    # Regression: the second report for the same check in the same job got the first's ID
+    # and was dropped as a duplicate.
+    meta = {"service": "payments-api", "check": "tests.unit", "format": "junit"}
+    first = client.post(
+        "/v1/reports",
+        data={"meta": json.dumps(meta)},
+        headers=AUTH,
+        files=[("files", ("module-a.xml", b"<testsuite/>"))],
+    ).json()
+    second = client.post(
+        "/v1/reports",
+        data={"meta": json.dumps(meta)},
+        headers=AUTH,
+        files=[("files", ("module-b.xml", b"<testsuite/>"))],
+    ).json()
+    assert first["event_id"] != second["event_id"]
+
+
+def test_an_upload_over_the_size_limit_is_refused(published):
+    # Its own app with a 10-byte limit; the limit counts all files in the upload together.
+    from conftest import fake_verify
+    from cqp.gather.app import create_app
+    from fastapi.testclient import TestClient
+
+    app = create_app(
+        fake_verify,
+        lambda *a: published.append(a),
+        lambda *a: "mem://x",
+        {},
+        owns=lambda project, service: True,
+        max_upload_bytes=10,
+    )
+    meta = {"service": "payments-api", "check": "tests.unit", "format": "junit"}
+    files = [("files", ("a.xml", b"123456")), ("files", ("b.xml", b"789012"))]
+    r = TestClient(app).post(
+        "/v1/reports", data={"meta": json.dumps(meta)}, files=files, headers=AUTH
+    )
+    assert r.status_code == 413 and published == []

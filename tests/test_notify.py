@@ -1,11 +1,12 @@
 """Notifier against a real Postgres, with GitLab and Slack faked."""
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 from cqp.notify import db
-from cqp.notify.worker import decode, handle, post_to_slack, render, sweep
+from cqp.notify.worker import decode, handle, poll_once, post_to_slack, render, sweep
 from cqp.store.db import save
 from prometheus_client import REGISTRY
 
@@ -255,3 +256,65 @@ def test_a_message_that_is_not_a_decision_is_skipped(value):
 
 def test_a_decision_message_is_decoded():
     assert decode(b'{"decision_id": "d-1", "context": {}}') == {"decision_id": "d-1", "context": {}}
+
+
+def test_a_wait_on_uploads_only_is_retried_at_its_deadline_not_at_once(conn):
+    # No named checks: the gate is only waiting for its own uploads to land.
+    db.remember(
+        conn,
+        "payments/payments-api",
+        4412,
+        "payments-api",
+        IMAGE,
+        "pr",
+        [],
+        T0 + timedelta(minutes=1),
+    )
+    conn.commit()
+    gitlab = FakeGitLab()
+    sweep(conn, gitlab, T0)
+    assert gitlab.retried == []
+    sweep(conn, gitlab, T0 + timedelta(minutes=1))
+    assert gitlab.retried == ["4412"]
+
+
+class Msg:
+    def __init__(self, value, error=None):
+        self._value, self._error = value, error
+
+    def value(self):
+        return self._value
+
+    def error(self):
+        return self._error
+
+
+class Consumer:
+    """Hands out the given messages one per poll, and records commits."""
+
+    def __init__(self, *messages):
+        self.messages, self.committed = list(messages), []
+
+    def poll(self, timeout):
+        return self.messages.pop(0) if self.messages else None
+
+    def commit(self, message, asynchronous):
+        self.committed.append(message)
+
+
+def test_poll_once_handles_a_decision_and_commits(conn):
+    event = json.dumps(decision()).encode()
+    consumer, gitlab = Consumer(Msg(event)), FakeGitLab()
+    poll_once(consumer, gitlab, conn)
+    assert gitlab.statuses == [("failed", "cqp/pr")] and len(consumer.committed) == 1
+
+
+def test_poll_once_commits_past_a_message_that_is_not_a_decision(conn):
+    consumer, gitlab = Consumer(Msg(b"not json")), FakeGitLab()
+    poll_once(consumer, gitlab, conn)
+    assert gitlab.statuses == [] and len(consumer.committed) == 1
+
+
+def test_poll_once_raises_on_a_kafka_error(conn):
+    with pytest.raises(RuntimeError, match="broker gone"):
+        poll_once(Consumer(Msg(None, error="broker gone")), FakeGitLab(), conn)

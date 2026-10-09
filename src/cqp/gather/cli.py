@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     gat.add_argument("--max-wait", type=float, default=120, help="seconds to wait while pending")
     gat.add_argument(
-        "--fix", action="store_true", help="this change is a fix (allowed during incidents)"
+        "--fix", metavar="TICKET", help="this change is a fix for TICKET (allowed during incidents)"
     )
     pol = sub.add_parser("policy", help="check or publish the team policy file")
     pol.add_argument("action", choices=["check", "publish"])
@@ -150,7 +150,9 @@ def main(argv: list[str] | None = None) -> int:
         if not (url and token and args.service):
             return fallback(args.stage, "CQP_URL, CQP_TOKEN or service missing")
         with httpx.Client() as client:
-            return gate(args.service, args.stage, url, token, client, args.max_wait, fix=args.fix)
+            return gate(
+                args.service, args.stage, url, token, client, args.max_wait, fix_ticket=args.fix
+            )
 
     if not (url and token and args.service):
         return warn("CQP_URL, CQP_TOKEN or service missing; nothing reported")

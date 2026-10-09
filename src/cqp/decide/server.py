@@ -27,6 +27,8 @@ policy = Policy(
     os.environ.get("CQP_OPA_URL", "http://localhost:8181"),
 )
 policy.install()
+with psycopg.connect(database_url) as conn:
+    decide_db.save_policy_version(conn, policy.version, policy.rego)
 
 pool = ConnectionPool(database_url)
 # Decision events must never slow a gate down, so they don't wait for Kafka's acknowledgement.

@@ -10,7 +10,7 @@ def kafka_publisher(bootstrap: str, wait_for_ack: bool = True):
     # Idempotence: if the client retries a send, Kafka still keeps one copy.
     producer = Producer({"bootstrap.servers": bootstrap, "enable.idempotence": True})
 
-    def publish(topic: str, key: str, event: dict) -> None:
+    def publish(topic: str, key: str | bytes | None, event: dict) -> None:
         """Sends one event, keyed so related events stay in order."""
         producer.produce(topic, key=key, value=json.dumps(event).encode())
         if not wait_for_ack:

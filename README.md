@@ -162,15 +162,19 @@ failed. Fingerprints let policy tell a new finding from an old one. Pass/fail ag
   retried upload or a re-read Kafka message is harmless.
 - `builds` table: the build's provenance signal records which image came from which commit. Results
   recorded against the commit (unit tests run before the build) therefore count for the image.
-- `latest(service, image)` returns the newest result per check, so a rerun replaces the earlier
-  attempt.
+- `latest(service, image)` returns the newest run's result per check, so a rerun replaces the
+  earlier attempt. If one run sent several reports for a check (two test modules), any failure
+  among them wins; the event ID includes a hash of the files, so those reports never collide.
+- Uploads are capped at 50 MB in total (`CQP_MAX_UPLOAD_MB`); bigger ones get a 413.
 
 **Kafka handling.**
 
 - The worker commits the Kafka offset **only after** the database write. A crash in between means
   the message is read again, and the idempotent insert makes that safe.
-- Events that can never be processed (unknown format, unreadable report) go to `cqp.signals.dlq`.
-  They are not stored, so they count as **missing** evidence, never as a pass.
+- Events that can never be processed (unknown format, unreadable report, JSON of the wrong shape)
+  go to `cqp.signals.dlq`. They are not stored, so they count as **missing** evidence, never as
+  a pass. The DLQ write must be acknowledged by Kafka before the offset is committed; if it
+  isn't, the worker restarts and reads the message again, so nothing is lost.
 - Database or Kafka errors crash the worker on purpose. The orchestrator restarts it and it resumes
   from the last committed offset.
 
@@ -194,17 +198,24 @@ there is one, and the event IDs this pipeline uploaded. The commit comes from th
    `deadline` in minutes and an `on_missing` effect.
 2. **Completeness.** A check that hasn't reported is **waiting** until its deadline, counted from
    the first time this change was asked about at this stage. After that it is **missing**. If the
-   caller's own uploads aren't stored yet, CQP waits for them for up to 60 seconds.
+   caller's own uploads aren't stored yet, CQP waits for them for up to 60 seconds. A result older
+   than its `max_age_days` (security scans: 7 days) doesn't count either; the finding says it's
+   too old rather than missing.
 3. **Never decide on half the evidence.** While anything is waiting, the answer is
    `status: pending` (outcome `REQUIRE_VALIDATION`) with the list of what it's waiting for.
+   The gate polls every 5s; a repeat poll from the same job, still waiting on the same things,
+   gets the same decision back, so there's no new row, MR edit or status post each time.
 4. **Rules.** `policy/baseline.rego` runs in an OPA sidecar. A failing check gets the effect
    the stage matrix gives it (for example, failing unit tests block a PR). A missing check gets its
-   `on_missing` effect. Each finding has a rule name and a plain message.
+   `on_missing` effect. Each finding has a rule name and a plain message. If OPA has lost the
+   rules (it restarted), CQP reloads them and asks again; it never reads "no answer" as "no
+   findings", which would let everything through.
 5. **Outcome.** The strictest finding wins: `PROCEED`, `PROCEED_WITH_WARNING`,
    `REQUIRE_VALIDATION` or `BLOCKED`. There is no score.
 6. **Record and replay.** Every decision, pending or final, is inserted and never updated. It stores
-   the exact policy input and a policy version (a hash of the Rego and the expectations), so
-   `replay()` reproduces the outcome later.
+   the exact policy input and a policy version (a hash of the Rego and the expectations). Each
+   version's Rego is kept in `policy_versions`, so `replay()` re-runs an old decision on the
+   rules it was made with, even after the baseline has changed.
 
 **`cqp gate`** (the CI step) sends every job's event IDs from `.cqp/events/` and polls every 5s
 while the answer is pending, up to `--max-wait` (120s by default).
@@ -276,8 +287,9 @@ applies:
 
 | Production state | Effect | Rule |
 | --- | --- | --- |
-| Error budget used up | validate, unless `cqp gate --fix` | `baseline.error_budget` |
-| Active incident | validate, unless `cqp gate --fix` | `baseline.active_incident` |
+| Error budget used up | validate, unless `cqp gate --fix <ticket>` | `baseline.error_budget` |
+| Active incident | validate, unless `cqp gate --fix <ticket>` | `baseline.active_incident` |
+| Released as a fix | warn (so it's in the MR comment and Slack) | `baseline.fix_release` |
 | A canary failed in the last 24h | warn: use the slowest canary steps | `baseline.recent_rollback` |
 | Organisation-wide freeze | block (even fixes; emergencies use break-glass) | `baseline.change_freeze` |
 | Health missing or older than 5 min | validate for tier-1, warn otherwise | `baseline.production_health` |
@@ -453,6 +465,20 @@ skipped:
 ```bash
 TESTCONTAINERS_RYUK_DISABLED=true uv run pytest
 ```
+
+In CI (`.gitlab-ci.yml`), `CQP_REQUIRE_DOCKER=1` turns those skips into failures, so a runner
+without Docker can't produce a green pipeline. The same file runs ruff and mypy with the org's CI
+settings, which are also in `pyproject.toml`.
+
+What the tests cover:
+
+| Layer | Where | What it proves |
+| --- | --- | --- |
+| Unit | `test_engine`, `test_normalize`, `test_gate`, `test_cli*`, … | Logic, with fakes for HTTP and Kafka |
+| Property | `test_normalize` (Hypothesis) | Any input is either read or parked, never a worker crash |
+| Integration | `test_decide_api`, `test_policy`, `test_store`, … | Real Postgres and OPA in containers |
+| Contract | `test_contract` | Real Decision API output drives the real notifier and gate |
+| End to end | `scripts/e2e.sh` | The whole docker-compose stack, including outages |
 
 Run the store worker:
 
