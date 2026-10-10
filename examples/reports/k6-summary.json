@@ -1,0 +1,85 @@
+{
+  "state": {
+    "testRunDurationMs": 600412.7,
+    "isStdOutTTY": false
+  },
+  "options": {
+    "summaryTrendStats": [
+      "avg",
+      "min",
+      "med",
+      "max",
+      "p(90)",
+      "p(95)"
+    ]
+  },
+  "root_group": {
+    "name": "",
+    "path": "",
+    "checks": [
+      {
+        "name": "status is 200",
+        "path": "::status is 200",
+        "passes": 59731,
+        "fails": 12
+      }
+    ]
+  },
+  "metrics": {
+    "http_req_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 118.6,
+        "min": 21.3,
+        "med": 97.2,
+        "max": 1840.5,
+        "p(90)": 176.9,
+        "p(95)": 212.4
+      }
+    },
+    "http_req_failed": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 0.0002,
+        "passes": 12,
+        "fails": 59731
+      }
+    },
+    "http_reqs": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 59743,
+        "rate": 99.5
+      }
+    },
+    "iterations": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 59743,
+        "rate": 99.5
+      }
+    },
+    "vus_max": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "value": 50,
+        "min": 50,
+        "max": 50
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 0.9998,
+        "passes": 59731,
+        "fails": 12
+      }
+    }
+  }
+}

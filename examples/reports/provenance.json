@@ -1,0 +1,6 @@
+{
+  "built_by": "golden-path",
+  "builder": "gitlab-ci",
+  "dockerfile": "Dockerfile",
+  "base_image": "eclipse-temurin:21-jre"
+}
