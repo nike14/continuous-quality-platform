@@ -361,8 +361,8 @@ cqp waiver --service ledger-service --rule baseline.scan.sca --item CVE-2026-123
   `scan.sca failed: {...} (waived until 2026-10-16, SEC-118)`.
 - Rules, also in `baseline.rego`:
   - only approvers can create waivers, for services their repo owns (security: any service);
-  - security rules (SCA, secrets, contracts) need a security approver;
-  - SCA and secrets waivers must name their items;
+  - security rules (SCA, container, secrets, contracts) need a security approver;
+  - SCA, container and secrets waivers must name their items;
   - at most 30 days, and they expire on their own;
   - missing evidence and a change freeze can't be waived (those need break-glass).
 - Active waivers are part of the decision input, so a replay sees exactly the waivers that applied.

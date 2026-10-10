@@ -1,8 +1,14 @@
 """Baseline rules evaluated by a real OPA (the `opa_url` fixture in conftest)."""
 
+from typing import get_args
+
 import pytest
 from conftest import POLICY_DIR
 from cqp.decide.policy import Policy
+from cqp.gather.event import Check
+
+# Measurements are judged by thresholds, and provenance never fails, so neither needs a cell.
+NOT_JUDGED_BY_STATUS = {"perf.load", "build.provenance"}
 
 UNIT_FAIL = {
     "tests.unit": {
@@ -34,6 +40,37 @@ def test_failing_unit_tests_block_a_pr_and_name_the_tests(policy):
     assert "PaymentRefundTest.partial" in f["message"]
 
 
+def test_every_check_cqp_accepts_is_judged_somewhere(policy):
+    # Regression: tests.component, tests.api and scan.container were stored but never judged,
+    # so a failing API test still gave PROCEED.
+    on_fail = policy._query("on_fail", {})
+    accepted = set(get_args(Check)) - NOT_JUDGED_BY_STATUS
+    assert accepted <= set(on_fail), accepted - set(on_fail)
+
+
+@pytest.mark.parametrize(
+    "check, stage, effect",
+    [
+        ("tests.component", "pr", "block"),
+        ("tests.api", "integration", "block"),
+        ("scan.container", "build", "block"),
+        ("static.quality", "build", "block"),
+        ("static.quality", "pr", "warn"),
+    ],
+)
+def test_newly_judged_checks(policy, check, stage, effect):
+    failing = {check: {"kind": "outcome", "status": "fail", "payload": {}}}
+    [f] = run(policy, stage, failing)
+    assert (f["rule"], f["effect"]) == (f"baseline.{check}", effect)
+
+
+def test_container_scans_are_security_rules(policy):
+    waiver = {"rule": "baseline.scan.container", "days": 7}
+    errors = policy.waiver_errors(waiver, "approver")
+    assert "baseline security rules need a security approver" in errors
+    assert any("must name the items" in e for e in errors)
+
+
 def test_effect_depends_on_stage(policy):
     contract_fail = {"tests.contract": {"kind": "outcome", "status": "fail", "payload": {}}}
     assert run(policy, "pr", contract_fail)[0]["effect"] == "warn"
@@ -48,10 +85,6 @@ def test_failing_unit_tests_block_a_prod_deploy(policy):
     # The image's own evidence decides; a BLOCKED build can't be deployed around.
     [f] = run(policy, "prod-deploy", UNIT_FAIL)
     assert f["rule"] == "baseline.tests.unit" and f["effect"] == "block"
-
-
-# Measurements are judged by thresholds, and provenance never fails, so neither needs a cell.
-NOT_JUDGED_BY_STATUS = {"perf.load", "build.provenance"}
 
 
 def test_failing_prod_evidence_is_never_better_than_missing(policy):

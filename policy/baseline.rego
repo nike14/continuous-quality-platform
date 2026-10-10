@@ -11,12 +11,16 @@ import rego.v1
 # prod-deploy judges every check it expects: failing evidence must never do better than none.
 on_fail := {
 	"tests.unit": {"pr": "block", "build": "block", "prod-deploy": "block"},
+	"tests.component": {"pr": "block", "build": "block", "prod-deploy": "block"},
+	"tests.api": {"pr": "warn", "integration": "block", "prod-deploy": "block"},
 	"tests.contract": {"pr": "warn", "build": "block", "integration": "block", "prod-deploy": "block"},
 	"tests.integration": {"integration": "block", "prod-deploy": "block"},
 	"tests.e2e": {"pr": "warn", "integration": "validate", "prod-deploy": "warn"},
 	"scan.sca": {"pr": "warn", "build": "block", "integration": "block", "prod-deploy": "block"},
 	"scan.secrets": {"pr": "block", "build": "block", "prod-deploy": "block"},
-	"static.quality": {"pr": "warn", "build": "warn"},
+	"scan.container": {"pr": "warn", "build": "block", "integration": "block", "prod-deploy": "block"},
+	# Only error-level issues fail a SARIF report; a team may soften this, it isn't locked.
+	"static.quality": {"pr": "warn", "build": "block"},
 }
 
 # Organisation-wide cells: a team policy may make them stricter, never looser.
@@ -26,19 +30,20 @@ locked := {
 	"tests.integration": {"prod-deploy"},
 	"scan.sca": {"build", "integration", "prod-deploy"},
 	"scan.secrets": {"pr", "build", "prod-deploy"},
+	"scan.container": {"build", "integration", "prod-deploy"},
 }
 
 # Orders effects, so "stricter" can be checked: a team may only move a locked cell up this list.
 rank := {"warn": 1, "validate": 2, "block": 3}
 
 # Only a security approver may waive these; nobody may waive the second set (break-glass instead).
-security_rules := {"baseline.tests.contract", "baseline.scan.sca", "baseline.scan.secrets"}
+security_rules := {"baseline.tests.contract", "baseline.scan.sca", "baseline.scan.secrets", "baseline.scan.container"}
 
 not_waivable := {"baseline.evidence_required", "baseline.change_freeze"}
 
 # A waiver on these must name the items it accepts (CVE IDs, finding fingerprints), so a new
 # critical CVE found while it is active still blocks.
-item_rules := {"baseline.scan.sca", "baseline.scan.secrets"}
+item_rules := {"baseline.scan.sca", "baseline.scan.secrets", "baseline.scan.container"}
 
 # ---- Decisions: raw findings, then kill switches, waivers and break-glass ----
 
