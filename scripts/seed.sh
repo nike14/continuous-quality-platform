@@ -9,13 +9,14 @@ cqp()    { uv run -q --project "$root" cqp "$@"; }
 token()  { uv run -q --project "$root" python "$root/scripts/dev_token.py" "$@"; }  # sha [role] [project]
 newsha() { python3 -c "import secrets; print(secrets.token_hex(20))"; }
 
-JUNIT_PASS='<testsuite><testcase classname="LedgerTest" name="rounding"/><testcase classname="RefundTest" name="full"/><testcase classname="RefundTest" name="slow"><skipped/></testcase></testsuite>'
-JUNIT_FAIL='<testsuite><testcase classname="PaymentRefundTest" name="partial"><failure/></testcase><testcase classname="LedgerTest" name="rounding"/></testsuite>'
-SARIF_CLEAN='{"runs":[{"results":[]}]}'
-SARIF_ISSUES='{"runs":[{"results":[{"ruleId":"sql-injection","level":"error","fingerprints":{"v1":"fp-sqli-1"}},{"ruleId":"unused-var","level":"note"}]}]}'
-SBOM_CLEAN='{"vulnerabilities":[{"id":"CVE-2026-0001","ratings":[{"severity":"low"}]}]}'
-SBOM_CRITICAL='{"vulnerabilities":[{"id":"CVE-2026-1234","ratings":[{"severity":"critical"}]},{"id":"CVE-2026-0002","ratings":[{"severity":"medium"}]}]}'
-K6='{"metrics":{"http_req_duration":{"values":{"p(95)":212.4}}}}'
+# Reports as the real tools write them (Surefire JUnit, Gitleaks/Semgrep SARIF, Trivy CycloneDX, k6 summary).
+JUNIT_PASS="$(cat "$root/examples/reports/junit-pass.xml")"
+JUNIT_FAIL="$(cat "$root/examples/reports/junit-fail.xml")"
+SARIF_CLEAN="$(cat "$root/examples/reports/sarif-clean.json")"
+SARIF_ISSUES="$(cat "$root/examples/reports/sarif-issues.json")"
+SBOM_CLEAN="$(cat "$root/examples/reports/sbom-clean.json")"
+SBOM_CRITICAL="$(cat "$root/examples/reports/sbom-critical.json")"
+K6="$(cat "$root/examples/reports/k6-summary.json")"
 
 repo_of() { case "$1" in checkout-web) echo checkout/checkout-web ;; ledger-service) echo payments/ledger-service ;;
   *) echo payments/payments-api ;; esac; }
