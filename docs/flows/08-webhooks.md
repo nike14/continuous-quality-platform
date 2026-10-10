@@ -1,6 +1,6 @@
 # 8. Webhooks
 
-[← All flows](README.md) · Step 8 of 12
+[← All flows](README.md) · Step 8 of 13
 
 **Callers:** tools outside CI, each with a webhook template configured on the tool's side.
 
@@ -25,7 +25,7 @@ wrong shape `422`.
 Any body may also carry `observed_at` (ISO 8601 with a timezone), so a late delivery can't
 overwrite newer state. **Response:** `202 {"event_ids": ["…"]}`.
 
-**Test it in Postman** ([setup](12-postman-testing.md)): folders *05 Production* and *07 Pact Broker webhook*.
+**Test it in Postman** ([setup](13-postman-testing.md)): folders *07 · Production deploy* and *08 · Webhook from a tool outside CI*.
 
 ---
 

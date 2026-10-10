@@ -1,6 +1,6 @@
 # 5. Team policy
 
-[← All flows](README.md) · Step 5 of 12
+[← All flows](README.md) · Step 5 of 13
 
 **Caller:** the `quality-policy` job, only when `.quality/policy.yaml` changes.
 
@@ -36,7 +36,11 @@ Every later decision for the service uses it and records its version. In the Pos
 checkout-web's load test reports p95 212 ms against the team's 150 ms limit, so the integration
 gate answers `REQUIRE_VALIDATION` from `team.perf.load.threshold`.
 
-**Test it in Postman** ([setup](12-postman-testing.md)): folder *03 Team policy*.
+A policy published while a change is in the middle of its pipeline applies from that change's next
+gate request, on the evidence already uploaded. See
+[10. When rules are set, and changing them mid-flow](10-rules-mid-flow.md) for a worked example.
+
+**Test it in Postman** ([setup](13-postman-testing.md)): folder *05 · Team policy*.
 
 ---
 

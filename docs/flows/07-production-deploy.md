@@ -1,6 +1,6 @@
 # 7. Production deploy
 
-[← All flows](README.md) · Step 7 of 12
+[← All flows](README.md) · Step 7 of 13
 
 **Callers:** monitoring, the incident tool and release management (webhooks); the **deploy
 system's** pipeline (`cqp gate --stage prod-deploy`); Argo Rollouts after the canary.
@@ -28,7 +28,7 @@ plus the service's production state:
 
 If CQP can't be reached at `prod-deploy`, the gate asks for approval (exit 2) instead of carrying on.
 
-**Test it in Postman** ([setup](12-postman-testing.md)): folder *05 Production*, which uses a new throwaway `e2e-svc-pm-…` service each run.
+**Test it in Postman** ([setup](13-postman-testing.md)): folder *07 · Production deploy*, which uses a new throwaway `e2e-svc-pm-…` service each run.
 
 ---
 

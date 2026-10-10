@@ -1,6 +1,6 @@
 # 6. Pending decisions and resume
 
-[← All flows](README.md) · Step 6 of 12
+[← All flows](README.md) · Step 6 of 13
 
 **Callers:** the gate job, then the notifier (which calls GitLab).
 
@@ -23,7 +23,7 @@ passed, or the caller's own uploads aren't stored yet, the answer is:
    checks arrive or the deadline passes, it calls GitLab's
    `POST /projects/:id/jobs/:job_id/retry`. The re-run gate job gets the final decision.
 
-**Test it in Postman** ([setup](12-postman-testing.md)): folder *04 Pending*. Watch `docker compose logs -f notifier` for the retry.
+**Test it in Postman** ([setup](13-postman-testing.md)): folder *06 · Pending decision*. Watch `docker compose logs -f notifier` for the retry.
 
 ---
 

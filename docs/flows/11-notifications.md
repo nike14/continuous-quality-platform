@@ -1,6 +1,6 @@
-# 10. What CQP calls: GitLab and Slack
+# 11. What CQP calls: GitLab and Slack
 
-[← All flows](README.md) · Step 10 of 12
+[← All flows](README.md) · Step 11 of 13
 
 The notifier reads every decision from Kafka and calls GitLab with a bot token (`CQP_GITLAB_API`,
 `CQP_GITLAB_TOKEN`; `src/cqp/notify/gitlab.py`):
@@ -25,4 +25,4 @@ Locally `CQP_GITLAB_API` isn't set, so the notifier **logs** what it would post 
 
 ---
 
-[← 9. Kill switch](09-kill-switch.md) · [11. Read-only views →](11-read-only-views.md)
+[← 10. When rules are set, and changing them mid-flow](10-rules-mid-flow.md) · [12. Read-only views →](12-read-only-views.md)

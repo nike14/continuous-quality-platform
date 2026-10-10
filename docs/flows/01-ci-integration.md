@@ -1,6 +1,6 @@
 # 1. How a CI job calls CQP
 
-[← All flows](README.md) · Step 1 of 12
+[← All flows](README.md) · Step 1 of 13
 
 The CI template (`ci/quality-report.gitlab-ci.yml`) contains no URLs. It runs `cqp` commands, and
 the CLI builds each request from **environment variables that GitLab sets in every job**:

@@ -22,14 +22,16 @@ ends with a link to the next.
 | 7 | [Production deploy](07-production-deploy.md) | Deploy system's pipeline, monitoring, incident tool | `POST /v1/decisions` (`prod-deploy`), `/v1/hooks/runtime` |
 | 8 | [Webhooks](08-webhooks.md) | Pact Broker, Argo Rollouts, monitoring, incident tool, release management | `POST /v1/hooks/{tool}` |
 | 9 | [Kill switch](09-kill-switch.md) | Platform team (`cqp kill-switch`) | `POST`/`GET`/`DELETE /v1/kill-switches` |
-| 10 | [What CQP calls: GitLab and Slack](10-notifications.md) | The notifier | GitLab MR notes, commit statuses, job retry; Slack |
-| 11 | [Read-only views](11-read-only-views.md) | Anyone, no token | `GET /portal` and the `GET` endpoints |
-| 12 | [Testing with Postman](12-postman-testing.md) | You | Setup, how the collection imitates CI, the order to run it in |
+| 10 | [When rules are set, and changing them mid-flow](10-rules-mid-flow.md) | Platform team, teams, approvers | When each kind of rule takes effect; a live example of a rule added mid-flow |
+| 11 | [What CQP calls: GitLab and Slack](11-notifications.md) | The notifier | GitLab MR notes, commit statuses, job retry; Slack |
+| 12 | [Read-only views](12-read-only-views.md) | Anyone, no token | `GET /portal` and the `GET` endpoints |
+| 13 | [Testing with Postman](13-postman-testing.md) | You | Setup, how the collection imitates CI, the order to run it in |
 
 - **Steps 1 and 2** are the basics every other flow builds on.
 - **Steps 3 to 9** are the flows, from the first MR to production.
-- **Steps 10 and 11** are what CQP does after deciding, and how to look at the results.
-- **Step 12** is how to try every flow yourself in Postman.
+- **Step 10** explains when rules take effect, and what happens when they change mid-flow.
+- **Steps 11 and 12** are what CQP does after deciding, and how to look at the results.
+- **Step 13** is how to try every flow yourself in Postman.
 
 ## The four outcomes
 

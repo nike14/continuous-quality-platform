@@ -1,9 +1,11 @@
-# 12. Testing with Postman
+# 13. Testing with Postman
 
-[← All flows](README.md) · Step 12 of 12
+[← All flows](README.md) · Step 13 of 13
 
-`postman.json` at the repo root holds every request above, in order, with sample data and a check on
-each response (78 requests, 114 checks).
+`postman.json` at the repo root holds every flow above as a folder, with sample data and checks on
+each response (86 requests, 150 checks). Folder numbers match the step numbers of these docs, and
+every request's **Docs** tab says who calls it in real life, what it sends, what to expect and what
+to look at. The collection's own Docs tab explains tokens and how to read a decision.
 
 ## Setup (once)
 
@@ -38,28 +40,34 @@ each response (78 requests, 114 checks).
 Run folders top to bottom, and requests inside a folder in order: later requests use IDs saved by
 earlier ones. Each folder starts a new change, so any folder can be run again on its own.
 
-| Folder | Flow | Outcomes you should see |
+| Folder | Doc | Outcomes you should see |
 | --- | --- | --- |
-| 00 Before you start | Both APIs reachable | 200, 200 |
-| 01 PR gate | [PR gate](03-pr-gate.md) | `BLOCKED`, then `PROCEED` |
-| 02 Build gate | [Build gate](04-build-gate.md) | `BLOCKED` → approver waiver refused (403) → security waiver → `PROCEED_WITH_WARNING` → revoked → `BLOCKED` → break-glass → `PROCEED_WITH_WARNING` |
-| 03 Team policy | [Team policy](05-team-policy.md) | Dry run 200, loosening 422, publish 200, then `REQUIRE_VALIDATION` (advisory mode) |
-| 04 Pending | [Pending and resume](06-pending-and-resume.md) | `pending`, then `PROCEED` |
-| 05 Production | [Production deploy](07-production-deploy.md), [Webhooks](08-webhooks.md) | Own pipeline 403 → `PROCEED` → incident `REQUIRE_VALIDATION` → fix `PROCEED_WITH_WARNING` → no budget `REQUIRE_VALIDATION` → freeze `BLOCKED` → canary failed `PROCEED_WITH_WARNING` |
-| 06 Kill switch | [Kill switch](09-kill-switch.md) | Non-platform 403, then `PROCEED_WITH_WARNING` while switched off, `BLOCKED` after |
-| 07 Pact Broker webhook | [Webhooks](08-webhooks.md) | 202 |
-| 08 Look around | [Read-only views](11-read-only-views.md) | 200s |
-| 09 Refused requests | Trust checks | The status in each request's name: 401, 403, 404 or 422 |
+| 00 · Start here | | `200`, `200` |
+| 03 · PR gate | [3](03-pr-gate.md) | `BLOCKED`, then `PROCEED` |
+| 04 · Build gate | [4](04-build-gate.md) | `BLOCKED` → approver waiver refused (`403`) → security waiver → `PROCEED_WITH_WARNING` → revoked → `BLOCKED` → break-glass → `PROCEED_WITH_WARNING` |
+| 05 · Team policy | [5](05-team-policy.md) | Dry run `200`, loosening `422`, publish `200`, then `REQUIRE_VALIDATION` (advisory mode) |
+| 06 · Pending decision | [6](06-pending-and-resume.md) | `pending`, then `PROCEED` |
+| 07 · Production deploy | [7](07-production-deploy.md), [8](08-webhooks.md) | Own pipeline `403` → `PROCEED` → incident `REQUIRE_VALIDATION` → fix `PROCEED_WITH_WARNING` → no budget `REQUIRE_VALIDATION` → freeze `BLOCKED` → canary failed `PROCEED_WITH_WARNING` |
+| 08 · Webhook (Pact Broker) | [8](08-webhooks.md) | `202` |
+| 09 · Kill switch | [9](09-kill-switch.md) | Non-platform `403`, then `PROCEED_WITH_WARNING` while switched off, `BLOCKED` after |
+| 10 · Rules changed mid-flow | [10](10-rules-mid-flow.md) | `PROCEED` → team publishes a limit → `REQUIRE_VALIDATION` → first decision still `PROCEED` → waiver → `PROCEED_WITH_WARNING` |
+| 12 · Read-only views | [12](12-read-only-views.md) | `200`s |
+| 99 · Refused requests | [1](01-ci-integration.md), [2](02-upload-report.md) | The status in each request's name: `401`, `403`, `404` or `422` |
+
+Docs steps 1, 2, 11 and 13 have no folder of their own: uploads (step 2) happen inside every
+folder, notifications (step 11) happen in the background (`docker compose logs -f notifier`), and
+step 13 is this page.
 
 ## Tips
 
 - If a decision comes back `pending` right after an upload, the store worker hasn't saved it yet.
   Send it again.
-- In folder 05, send **Freeze OFF** straight after the freeze decision: the freeze is
+- In folder 07, send **Freeze OFF** (request 17) straight after the freeze decision: the freeze is
   organisation-wide.
 - Production health counts as fresh for 5 minutes after an SLO update. If a decision shows
   `baseline.production_health`, re-send the SLO request.
-- Read `findings` in each decision response for the reason behind the outcome.
+- Read `findings` in each decision response for the reason behind the outcome. **View → Show
+  Postman Console** prints each gate's outcome and findings as you go.
 - Run everything at once: right-click the collection → **Run collection**, delay 1000 ms. Or from a
   terminal:
 
@@ -69,4 +77,4 @@ earlier ones. Each folder starts a new change, so any folder can be run again on
 
 ---
 
-[← 11. Read-only views](11-read-only-views.md) · [All flows →](README.md)
+[← 12. Read-only views](12-read-only-views.md) · [All flows →](README.md)

@@ -1,6 +1,6 @@
-# 11. Read-only views
+# 12. Read-only views
 
-[← All flows](README.md) · Step 11 of 12
+[← All flows](README.md) · Step 12 of 13
 
 No token needed.
 
@@ -15,8 +15,8 @@ No token needed.
 
 ---
 
-**Test it in Postman** ([setup](12-postman-testing.md)): folder *08 Look around*.
+**Test it in Postman** ([setup](13-postman-testing.md)): folder *12 · Read-only views*.
 
 ---
 
-[← 10. What CQP calls: GitLab and Slack](10-notifications.md) · [12. Testing with Postman →](12-postman-testing.md)
+[← 11. What CQP calls: GitLab and Slack](11-notifications.md) · [13. Testing with Postman →](13-postman-testing.md)
