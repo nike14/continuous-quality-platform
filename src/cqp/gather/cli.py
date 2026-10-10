@@ -98,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
     wai.add_argument("--reason", required=True)
     wai.add_argument("--ticket", required=True)
     wai.add_argument("--days", type=int, default=14)
+    wai.add_argument(
+        "--item",
+        action="append",
+        dest="items",
+        help="accept only this item, e.g. a CVE ID (repeatable; required for scan rules)",
+    )
     kil = sub.add_parser(
         "kill-switch", help="switch a misbehaving rule off everywhere (platform team)"
     )
@@ -125,7 +131,15 @@ def main(argv: list[str] | None = None) -> int:
                 return team_cli.policy(args.action, args.service, args.file, url, token, client)
             if args.command == "waiver":
                 return team_cli.waiver(
-                    args.service, args.rule, args.reason, args.ticket, args.days, url, token, client
+                    args.service,
+                    args.rule,
+                    args.reason,
+                    args.ticket,
+                    args.days,
+                    url,
+                    token,
+                    client,
+                    items=args.items,
                 )
             if args.command == "kill-switch":
                 return team_cli.create(

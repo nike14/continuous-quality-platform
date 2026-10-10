@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+from datetime import datetime
 
 from cqp.gather.event import raw_event
 
@@ -11,6 +12,19 @@ def valid_signature(secret: str, body: bytes, header: str | None) -> bool:
     expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     # compare_digest takes the same time however close the guess is.
     return header is not None and hmac.compare_digest(expected, header)
+
+
+def observed_at(body: dict) -> str | None:
+    """When the tool observed this (optional ISO 8601 `observed_at`); None means use arrival time.
+
+    With it, an update delivered late can't replace a newer one.
+    """
+    if (at := body.get("observed_at")) is None:
+        return None
+    t = datetime.fromisoformat(at)  # not a date: ValueError (TypeError if not text), so a 422
+    if t.tzinfo is None:
+        raise ValueError("observed_at needs a timezone")
+    return t.isoformat()
 
 
 def pact_broker(body: dict) -> list[dict]:
@@ -47,6 +61,7 @@ def argo_rollouts(body: dict) -> list[dict]:
             commit=body["commit"],
             run=body["analysis_run"],
             image=body["image"],
+            observed_at=observed_at(body),
             # Only a successful analysis passes;
             # Failed, Error or Inconclusive all count as a failed canary.
             payload={
@@ -66,6 +81,7 @@ def runtime(body: dict) -> list[dict]:
     {"type": "slo", "service", "error_budget_remaining", "at"}
     {"type": "incident", "service", "id", "severity", "state": "open|resolved"}
     {"type": "freeze", "active", "at"}  (organisation-wide, service "*")
+    Each may also carry `observed_at` (ISO 8601), so a late delivery can't overwrite newer state.
     """
     kind = body["type"]
     if kind == "slo":
@@ -97,6 +113,7 @@ def runtime(body: dict) -> list[dict]:
             commit=RUNTIME,
             run=run,
             payload=payload,
+            observed_at=observed_at(body),
         )
     ]
 

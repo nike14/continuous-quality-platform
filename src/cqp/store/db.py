@@ -80,17 +80,20 @@ def latest(
     rows = conn.execute(
         """WITH matching AS (
              SELECT check_name, kind, status, payload, event_id, run, producer, observed_at,
+                    stored_at,
                     first_value(run) OVER newest AS newest_run,
                     first_value(producer) OVER newest AS newest_producer
              FROM signals s
              WHERE s.service = %s
                AND (s.image = %s OR s.commit = %s
                     OR s.commit IN (SELECT commit FROM builds WHERE service = %s AND image = %s))
-             WINDOW newest AS (PARTITION BY check_name ORDER BY observed_at DESC)
+             -- observed_at is when the result was produced, not when it arrived, so a late
+             -- upload from an older run doesn't win. stored_at only breaks exact ties.
+             WINDOW newest AS (PARTITION BY check_name ORDER BY observed_at DESC, stored_at DESC)
            )
            SELECT DISTINCT ON (check_name) check_name, kind, status, payload, event_id, observed_at
            FROM matching WHERE run = newest_run AND producer = newest_producer
-           ORDER BY check_name, (status = 'fail') DESC, observed_at DESC""",
+           ORDER BY check_name, (status = 'fail') DESC, observed_at DESC, stored_at DESC""",
         (service, image, commit, service, image),
     ).fetchall()
     return {

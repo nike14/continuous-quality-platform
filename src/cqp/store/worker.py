@@ -24,12 +24,16 @@ def read_local(raw_ref: str) -> list[tuple[str, bytes]]:
 
 def process(msg, conn, consumer, dlq, read_raw=read_local) -> None:
     """Handles one Kafka message: store it, or park it in the DLQ."""
-    event = json.loads(msg.value())
+    event = None
     try:
+        event = json.loads(msg.value())
         signal = normalize(event, read_raw)
-    except BadEventError as e:
+    # ValueError: not JSON. KeyError/TypeError: a field missing, or not an object at all.
+    # Raising instead would re-read the same message forever and stop the worker for everyone.
+    except (BadEventError, ValueError, KeyError, TypeError) as e:
         # Parked, not lost; counts as missing evidence (never as a pass) until fixed and replayed.
-        dlq(DLQ_TOPIC, msg.key(), {"event": event, "error": str(e)})
+        parked = event if event is not None else msg.value().decode(errors="replace")
+        dlq(DLQ_TOPIC, msg.key(), {"event": parked, "error": f"{type(e).__name__}: {e}"})
         STORED.labels("dlq").inc()
     else:
         with conn.transaction():

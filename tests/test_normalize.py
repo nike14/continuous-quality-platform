@@ -81,6 +81,7 @@ def test_sarif_counts_levels_and_keeps_fingerprints():
     assert s["payload"] == {
         "by_level": {"error": 1, "note": 1},
         "fingerprints": ["fp-1", "unused-var"],
+        "failing": ["fp-1"],
     }
 
 
@@ -88,6 +89,7 @@ def test_cyclonedx_counts_severities():
     s = normalize(event("cyclonedx", "scan.sca"), files(CYCLONEDX))
     assert s["status"] == "fail"
     assert s["payload"]["by_severity"] == {"critical": 1, "low": 1}
+    assert s["payload"]["failing"] == ["CVE-2026-1234"]  # the low one doesn't fail the scan
 
 
 def test_k6_becomes_a_measurement():
@@ -99,6 +101,26 @@ def test_pact_webhook_payload_is_used_as_is():
     # Webhook events carry their payload, so no files are read (hence None).
     s = normalize(event("pact", "tests.contract", {"status": "fail", "consumer": "web"}), None)
     assert s["status"] == "fail"
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"status": "maybe"}, "pass"])
+def test_a_webhook_format_without_a_parsed_payload_is_a_bad_event(payload):
+    # Regression: a CI upload with format pact has no payload; it raised TypeError, which
+    # crashed the store worker on the same message forever.
+    with pytest.raises(BadEventError):
+        normalize(event("pact", "tests.contract", payload), None)
+
+
+def test_observed_at_is_when_the_result_was_produced_if_known():
+    produced = {
+        **event("pact", "tests.contract", {"status": "pass"}),
+        "observed_at": "2026-10-07T09:58:00+00:00",
+    }
+    assert normalize(produced, None)["observed_at"] == "2026-10-07T09:58:00+00:00"
+    # Events from before observed_at existed fall back to when they arrived.
+    assert normalize(event("pact", "tests.contract", {"status": "pass"}), None)["observed_at"] == (
+        "2026-10-07T10:00:00+00:00"
+    )
 
 
 def test_build_provenance_records_the_image():

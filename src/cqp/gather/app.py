@@ -6,6 +6,7 @@ Verify the sender, keep the raw file, publish, acknowledge.
 import hashlib
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Annotated
 
 import jwt
@@ -26,6 +27,14 @@ def digest(files: list[tuple[str, bytes]]) -> str:
     for name, data in files:
         h.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
     return h.hexdigest()
+
+
+def job_started(claims: dict) -> str | None:
+    """When the job's token was issued, i.e. when the job ran; None if the token doesn't say."""
+    # A retried job gets a new token, so it always counts as newer than the run it replaces,
+    # however late either upload arrives.
+    iat = claims.get("iat")
+    return datetime.fromtimestamp(iat, UTC).isoformat() if isinstance(iat, int | float) else None
 
 
 def create_app(
@@ -101,6 +110,7 @@ def create_app(
             run=str(claims["job_id"]),
             image=m.image,
             content=digest(saved),
+            observed_at=job_started(claims),
         )
         # Files first: the event only points at them, and the store worker reads them back.
         event["raw_ref"] = store(event["event_id"], saved)

@@ -235,6 +235,30 @@ def test_open_incident_needs_approval_but_a_fix_goes_out(setup, conn, ready_for_
     assert "released as a fix under INC-7" in fixed["findings"][0]["message"]
 
 
+def test_resolving_one_incident_does_not_hide_another_still_open(setup, conn, ready_for_prod):
+    api, _, _ = setup
+
+    def incident(id_, state, minutes_ago, severity="sev2"):
+        payload = {
+            "status": "fail" if state == "open" else "pass",
+            "id": id_,
+            "severity": severity,
+            "state": state,
+        }
+        runtime_event(
+            conn, "runtime.incident", payload, (T0 - timedelta(minutes=minutes_ago)).isoformat()
+        )
+
+    incident("INC-A", "open", 30, severity="sev1")
+    incident("INC-B", "open", 20)
+    incident("INC-B", "resolved", 10)  # the newest incident event, but about B only
+    d = ask(api, "prod-deploy", image=IMAGE)
+    assert d["outcome"] == "REQUIRE_VALIDATION" and d["input"]["runtime"]["incident"] == "sev1"
+
+    incident("INC-A", "resolved", 5)
+    assert ask(api, "prod-deploy", image=IMAGE)["outcome"] == "PROCEED"
+
+
 def test_failed_canary_in_the_last_day_warns(setup, conn, ready_for_prod):
     api, _, _ = setup
     # A canary of the previous image failed 3 hours ago.

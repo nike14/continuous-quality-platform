@@ -148,7 +148,7 @@ upload tests.e2e junit "$JUNIT_PASS" e2e.xml
 gate integration
 
 echo "-- Waivers: security accepts ledger-service's critical CVE for a week, so the build only warns"
-waiver_id="$(CQP_TOKEN="$(token x security)" cqp waiver --service ledger-service --rule baseline.scan.sca \
+waiver_id="$(CQP_TOKEN="$(token x security)" cqp waiver --service ledger-service --rule baseline.scan.sca --item CVE-2026-1234 \
   --reason "no fixed version yet; not reachable from our code" --ticket SEC-118 --days 7 \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['waiver_id'])")"
 change ledger-service "sha256:ledger-$RANDOM"
@@ -161,7 +161,7 @@ gate build
 curl -s -o /dev/null -X DELETE "$CQP_URL/v1/waivers/$waiver_id" -H "Authorization: Bearer $(token x security)"
 
 echo "-- Waivers: an active one, static-analysis issues on checkout-web for two weeks"
-CQP_TOKEN="$(token x approver)" cqp waiver --service checkout-web --rule baseline.static.quality \
+CQP_TOKEN="$(token x approver checkout/checkout-web)" cqp waiver --service checkout-web --rule baseline.static.quality \
   --reason "legacy module, rewrite planned" --ticket CHK-42 --days 14
 
 echo "-- Break-glass: on-call lets a blocked ledger-service build through during an incident"

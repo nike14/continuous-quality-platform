@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 
+import pytest
 from conftest import SECRET
 
 PACT = {
@@ -86,6 +87,31 @@ def test_production_state_becomes_service_level_events(client, published):
         ("payments-api", "runtime.incident", "fail"),
         ("*", "org.freeze", "fail"),
     ]
+
+
+def test_runtime_events_keep_the_time_the_tool_observed_them(client, published):
+    body = {
+        "type": "slo",
+        "service": "payments-api",
+        "error_budget_remaining": 0.4,
+        "at": "t3",
+        "observed_at": "2026-10-07T09:59:00Z",
+    }
+    assert post_hook(client, json.dumps(body).encode(), tool="runtime").status_code == 202
+    assert published[0][2]["observed_at"] == "2026-10-07T09:59:00+00:00"
+
+
+@pytest.mark.parametrize("at", ["yesterday", "2026-10-07T09:59:00", 5])
+def test_an_unreadable_or_zoneless_observed_at_is_rejected(client, published, at):
+    body = {
+        "type": "slo",
+        "service": "payments-api",
+        "error_budget_remaining": 0.4,
+        "at": "t4",
+        "observed_at": at,
+    }
+    assert post_hook(client, json.dumps(body).encode(), tool="runtime").status_code == 422
+    assert published == []
 
 
 def test_unknown_runtime_event_type_is_rejected(client, published):
