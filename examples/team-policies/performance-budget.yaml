@@ -1,0 +1,11 @@
+# A latency-sensitive service: a slow load test stops the change.
+# A threshold is checked against the measurement's value (perf.load: p95 in ms, from k6),
+# whenever that evidence is present, at any stage. The finding is team.perf.load.threshold.
+
+thresholds:
+  perf.load: {max: 300, effect: block}
+
+# The baseline only waits for perf.load at integration and prod-deploy. Wait for it at build too.
+extra_checks:
+  build:
+    perf.load: {deadline: 60, on_missing: validate}

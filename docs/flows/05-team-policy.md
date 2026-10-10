@@ -40,6 +40,40 @@ A policy published while a change is in the middle of its pipeline applies from 
 gate request, on the evidence already uploaded. See
 [10. When rules are set, and changing them mid-flow](10-rules-mid-flow.md) for a worked example.
 
+## More examples
+
+Each file in `examples/team-policies/` is a complete `.quality/policy.yaml` with comments.
+`tests/test_examples.py` checks that they're still accepted, or still rejected for the reasons
+they list.
+
+| File | What the team wants |
+| --- | --- |
+| `strict-payments.yaml` | Catch problems at the MR: contract, API, SCA and quality failures block the PR, and the PR waits for them |
+| `wait-for-more-checks.yaml` | Wait for component, container, API, e2e and contract results the baseline doesn't ask for |
+| `performance-budget.yaml` | A p95 latency limit that blocks, also checked at build |
+| `judge-at-more-stages.yaml` | Judge checks at stages where the baseline ignores them (integration tests at build) |
+| `softer-where-allowed.yaml` | Loosen cells that aren't locked (flaky e2e tests only warn) |
+| `rejected/loosens-locked-rules.yaml` | **422:** loosens secrets, contract and SCA cells |
+| `rejected/typos.yaml` | **422:** misspelt key, unknown stage, effect and check |
+
+Rules for writing one:
+
+- **Stricter is always allowed.** Making an effect stricter (`warn` < `validate` < `block`), or
+  judging a check at a stage the baseline doesn't, is always accepted.
+- **Looser only where it isn't locked.** The locked cells are in `locked` in
+  `policy/baseline.rego`: unit and integration tests at prod-deploy, contract tests at integration
+  and prod-deploy, secrets scans everywhere, and SCA and container scans from build on. For a
+  one-off, use a waiver instead.
+- **`on_fail` judges, `extra_checks` waits.** An `on_fail` cell applies only when the check
+  reports. Add it to `extra_checks` if the gate should also wait for it (see `strict-payments.yaml`).
+- **The baseline's expectations win.** An `extra_checks` entry for a check the baseline already
+  expects at that stage is ignored. You can't shorten its deadline or soften its `on_missing`.
+- **Thresholds need a value.** They compare `payload.value`, which today only `perf.load` (k6 p95,
+  ms) has. They apply at every stage where that evidence is present.
+
+To see a policy's effect without publishing it, run `cqp policy check`. To see exactly how OPA
+reads a team policy, see [OPA examples](../opa-examples.md) 04, 05, 06 and 14.
+
 **Test it in Postman** ([setup](13-postman-testing.md)): folder *05 · Team policy*.
 
 ---

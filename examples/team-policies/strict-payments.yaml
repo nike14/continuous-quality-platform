@@ -1,0 +1,16 @@
+# A tier-1 team that wants problems caught at the MR, not at build.
+# Every cell here is stricter than the baseline, so it's always accepted.
+
+on_fail:
+  tests.contract: {pr: block}       # baseline: warn at pr
+  tests.api: {pr: block}            # baseline: warn at pr
+  scan.sca: {pr: block}             # baseline: warn at pr
+  scan.container: {pr: validate}    # baseline: warn at pr
+  static.quality: {pr: block}       # baseline: warn at pr
+  tests.e2e: {prod-deploy: block}   # baseline: warn at prod-deploy
+
+# The checks above are only judged if they report. Wait for them at the MR too.
+extra_checks:
+  pr:
+    tests.contract: {deadline: 10, on_missing: validate}   # minutes
+    scan.sca: {deadline: 15, on_missing: warn}

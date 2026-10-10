@@ -1,0 +1,14 @@
+# A team that runs more suites than the baseline asks for, and wants the gate to wait for them.
+# extra_checks only adds checks: if the baseline already expects a check at a stage,
+# the baseline's deadline and on_missing win and the team's entry is ignored.
+
+extra_checks:
+  pr:
+    tests.component: {deadline: 0, on_missing: warn}       # must already be there
+  build:
+    scan.container: {deadline: 20, on_missing: block}      # image scan runs after the build
+    static.quality: {deadline: 5, on_missing: warn}
+  integration:
+    tests.api: {deadline: 30, on_missing: validate}
+    tests.e2e: {deadline: 45, on_missing: warn}
+    tests.contract: {deadline: 15, on_missing: validate}

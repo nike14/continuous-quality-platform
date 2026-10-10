@@ -1,0 +1,17 @@
+# REJECTED (422): the shape is checked before the rules run, so a typo fails the MR
+# instead of silently doing nothing.
+#   tresholds: Extra inputs are not permitted                               (misspelt key)
+#   on_fail.tests.unit.staging.[key]: Input should be 'pr', 'build', ...    (no such stage)
+#   on_fail.tests.e2e.integration: Input should be 'warn', 'validate' ...   (no such effect)
+#   extra_checks.pr.tests.smoke.[key]: Input should be 'tests.unit', ...    (no such check)
+
+tresholds:
+  perf.load: {max: 150, effect: validate}
+
+on_fail:
+  tests.unit: {staging: block}
+  tests.e2e: {integration: fail}
+
+extra_checks:
+  pr:
+    tests.smoke: {deadline: 5, on_missing: warn}

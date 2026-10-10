@@ -223,6 +223,9 @@ The main parts, top to bottom:
 
 Because rules live in one file, "why was this blocked?" always has a rule name and a message.
 
+To see the rules answer real inputs (waivers, break-glass, team policies, production state), run
+`./scripts/opa-examples.sh`. [OPA examples](opa-examples.md) explains each one.
+
 **Which checks the baseline judges.** Every check CQP accepts has an `on_fail` entry, so a
 failing result always produces a finding (a test enforces this):
 
@@ -466,6 +469,7 @@ dead-lettered events and linking a finding to its raw report aren't built yet.
 | `tests/test_store.py` | Saving signals, "newest result wins", DLQ |
 | `tests/test_engine.py` | Waiting vs missing, outcome selection |
 | `tests/test_policy.py` | The Rego rules, against a real OPA |
+| `tests/test_examples.py` | The files in `examples/team-policies/` and `examples/opa/` still say what CQP does |
 | `tests/test_decide_api.py` | Full decisions against real Postgres + OPA, including production state |
 | `tests/test_gate.py` | Gate polling, exit codes, fallbacks |
 | `tests/test_team_and_waivers.py`, `test_overrides.py`, `test_team_cli.py` | Team policies, waivers, kill switch, break-glass, portal |

@@ -1,0 +1,7 @@
+# Teams may also loosen a rule, but only a cell that isn't locked (see `locked` in
+# policy/baseline.rego). Here a team with flaky e2e tests stops them from needing a person.
+
+on_fail:
+  tests.e2e: {integration: warn}        # baseline: validate. Not locked, so allowed
+  static.quality: {build: validate}     # baseline: block. Not locked, so allowed
+  tests.api: {integration: validate}    # baseline: block. Not locked, so allowed

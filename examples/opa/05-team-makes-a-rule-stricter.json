@@ -1,0 +1,41 @@
+{
+  "about": "Baseline: failing e2e tests need validation at integration. The team says block, which is stricter, so the team's effect is used.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "integration",
+    "tier": "tier-1",
+    "evidence": {
+      "tests.e2e": {
+        "kind": "outcome",
+        "status": "fail",
+        "payload": {
+          "failing": [
+            "checkout.spec.ts > pays"
+          ]
+        }
+      }
+    },
+    "missing": [],
+    "team": {
+      "on_fail": {
+        "tests.e2e": {
+          "integration": "block"
+        }
+      }
+    },
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "block",
+      "items": [
+        "checkout.spec.ts > pays"
+      ],
+      "message": "tests.e2e failed: checkout.spec.ts > pays",
+      "rule": "baseline.tests.e2e"
+    }
+  ]
+}

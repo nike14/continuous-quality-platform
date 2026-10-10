@@ -1,0 +1,55 @@
+{
+  "about": "An on-call engineer broke glass during an outage. Nothing blocks, every finding stays visible, and break-glass is a finding of its own (so it reaches Slack).",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "build",
+    "tier": "tier-1",
+    "evidence": {
+      "tests.unit": {
+        "kind": "outcome",
+        "status": "fail",
+        "payload": {
+          "failed": 1,
+          "failing": [
+            "PaymentRefundTest.partial"
+          ]
+        }
+      }
+    },
+    "missing": [
+      {
+        "check": "scan.sca",
+        "on_missing": "block"
+      }
+    ],
+    "team": {},
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": {
+      "by": "oncall-amy",
+      "reason": "payments down",
+      "ticket": "INC-301"
+    }
+  },
+  "expect": [
+    {
+      "effect": "warn",
+      "message": "break-glass by oncall-amy: payments down (INC-301)",
+      "rule": "baseline.break_glass"
+    },
+    {
+      "effect": "warn",
+      "message": "scan.sca did not report before its deadline (overridden by break-glass)",
+      "rule": "baseline.evidence_required"
+    },
+    {
+      "effect": "warn",
+      "items": [
+        "PaymentRefundTest.partial"
+      ],
+      "message": "tests.unit failed: PaymentRefundTest.partial (overridden by break-glass)",
+      "rule": "baseline.tests.unit"
+    }
+  ]
+}

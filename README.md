@@ -319,7 +319,8 @@ The baseline is the organisation's floor. Teams adjust it for their own service 
 
 ### Team policy files
 
-A team keeps `.quality/policy.yaml` in its repo (see `examples/team-policy.yaml`):
+A team keeps `.quality/policy.yaml` in its repo (see `examples/team-policy.yaml`, and more in
+`examples/team-policies/`, described in [flow 5](docs/flows/05-team-policy.md#more-examples)):
 
 ```yaml
 extra_checks:            # wait for more checks before deciding
@@ -483,6 +484,8 @@ docker run --rm -v "$PWD/ops/prometheus:/p" --entrypoint promtool prom/prometheu
 | `src/cqp/catalog.py` | Service catalog: which repo owns a service, who may deploy |
 | `ci/quality-report.gitlab-ci.yml` | The golden-path templates: report, gate and team policy |
 | `examples/team-policy.yaml` | A sample `.quality/policy.yaml` |
+| `examples/team-policies/` | More team policies, including ones CQP rejects and why |
+| `examples/opa/` | Inputs to `baseline.rego` and what OPA answers ([guide](docs/opa-examples.md), `scripts/opa-examples.sh`) |
 
 ## Run it
 

@@ -1,0 +1,43 @@
+{
+  "about": "An organisation-wide freeze can't be waived (only break-glass gets past it). Production health is also stale: tier-1 needs validation for that, other tiers just a warning.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "prod-deploy",
+    "tier": "tier-1",
+    "evidence": {},
+    "missing": [],
+    "team": {},
+    "waivers": [
+      {
+        "rule": "baseline.change_freeze",
+        "items": [],
+        "ticket": "X-1",
+        "expires_at": "2026-10-20T00:00:00+00:00"
+      }
+    ],
+    "kill_switches": [],
+    "break_glass": null,
+    "runtime": {
+      "error_budget_remaining": 0.4,
+      "health_fresh": false,
+      "incident": null,
+      "rolled_back_recently": false,
+      "freeze": true
+    },
+    "fix": false,
+    "fix_ticket": null
+  },
+  "expect": [
+    {
+      "effect": "block",
+      "message": "organisation-wide change freeze",
+      "rule": "baseline.change_freeze"
+    },
+    {
+      "effect": "validate",
+      "message": "production health is missing or older than 5 minutes",
+      "rule": "baseline.production_health"
+    }
+  ]
+}

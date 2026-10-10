@@ -1,0 +1,10 @@
+# REJECTED (422): each of these is a locked baseline cell, which a team may only make stricter.
+#   scan.secrets at pr can't be looser than the organisation baseline (block)
+#   tests.contract at integration can't be looser than the organisation baseline (block)
+#   scan.sca at build can't be looser than the organisation baseline (block)
+# Use a waiver (with a ticket and an expiry) for a one-off instead.
+
+on_fail:
+  scan.secrets: {pr: warn}
+  tests.contract: {integration: validate}
+  scan.sca: {build: warn}

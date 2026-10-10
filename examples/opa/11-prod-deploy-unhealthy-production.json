@@ -1,0 +1,41 @@
+{
+  "about": "Production deploy of a tier-1 service while the error budget is used up, a SEV2 incident is open and a canary failed yesterday. Each production signal is its own finding.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "prod-deploy",
+    "tier": "tier-1",
+    "evidence": {},
+    "missing": [],
+    "team": {},
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null,
+    "runtime": {
+      "error_budget_remaining": 0,
+      "health_fresh": true,
+      "incident": "SEV2",
+      "rolled_back_recently": true,
+      "freeze": false
+    },
+    "fix": false,
+    "fix_ticket": null
+  },
+  "expect": [
+    {
+      "effect": "validate",
+      "message": "active SEV2 incident: only fixes go out without approval",
+      "rule": "baseline.active_incident"
+    },
+    {
+      "effect": "validate",
+      "message": "error budget used up: only fixes go out without approval",
+      "rule": "baseline.error_budget"
+    },
+    {
+      "effect": "warn",
+      "message": "a canary failed in the last 24h: use the slowest canary steps",
+      "rule": "baseline.recent_rollback"
+    }
+  ]
+}
