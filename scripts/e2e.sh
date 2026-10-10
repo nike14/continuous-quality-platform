@@ -18,10 +18,11 @@ check() {  # name expected actual
   else echo "FAIL  $1 (expected '$2', got '$3')"; failed=$((failed + 1)); fi
 }
 
-JUNIT_PASS='<testsuite><testcase classname="LedgerTest" name="rounding"/></testsuite>'
-JUNIT_FAIL='<testsuite><testcase classname="PaymentRefundTest" name="partial"><failure/></testcase></testsuite>'
-SARIF_CLEAN='{"runs":[{"results":[]}]}'
-K6='{"metrics":{"http_req_duration":{"values":{"p(95)":212}}}}'
+# Reports as the real tools write them (Surefire JUnit, Gitleaks/Semgrep SARIF, Trivy CycloneDX, k6 summary).
+JUNIT_PASS="$(cat "$root/examples/reports/junit-pass.xml")"
+JUNIT_FAIL="$(cat "$root/examples/reports/junit-fail.xml")"
+SARIF_CLEAN="$(cat "$root/examples/reports/sarif-clean.json")"
+K6="$(cat "$root/examples/reports/k6-summary.json")"
 
 workspace() { cd "$(mktemp -d)" && mkdir reports && export CI_JOB_ID="e2e-$RANDOM"; }
 upload() {  # check format content file

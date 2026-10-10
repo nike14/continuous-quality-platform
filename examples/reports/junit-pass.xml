@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="payments-api" tests="7" failures="0" errors="0" skipped="1" time="1.912">
+  <testsuite name="com.acme.payments.LedgerTest" tests="3" failures="0" errors="0" skipped="0" time="0.412" timestamp="2026-10-10T11:56:41" hostname="runner-7f9c2">
+    <properties>
+      <property name="java.version" value="21.0.4"/>
+      <property name="surefire.version" value="3.2.5"/>
+    </properties>
+    <testcase classname="LedgerTest" name="rounding" time="0.118"/>
+    <testcase classname="LedgerTest" name="doubleEntryBalances" time="0.204"/>
+    <testcase classname="LedgerTest" name="rejectsNegativeAmounts" time="0.090"/>
+  </testsuite>
+  <testsuite name="com.acme.payments.RefundTest" tests="4" failures="0" errors="0" skipped="1" time="1.500" timestamp="2026-10-10T11:56:42" hostname="runner-7f9c2">
+    <testcase classname="RefundTest" name="full" time="0.311"/>
+    <testcase classname="RefundTest" name="partial" time="0.287"/>
+    <testcase classname="RefundTest" name="idempotentRetry" time="0.902">
+      <system-out><![CDATA[11:56:43.120 INFO  RefundService - refund rf_8812 already applied, returning stored result]]></system-out>
+    </testcase>
+    <testcase classname="RefundTest" name="slow" time="0.000">
+      <skipped message="@Disabled: needs the bank sandbox, runs nightly"/>
+    </testcase>
+  </testsuite>
+</testsuites>

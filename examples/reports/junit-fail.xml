@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="payments-api" tests="5" failures="1" errors="0" skipped="0" time="1.377">
+  <testsuite name="com.acme.payments.PaymentRefundTest" tests="3" failures="1" errors="0" skipped="0" time="0.965" timestamp="2026-10-10T11:57:02" hostname="runner-7f9c2">
+    <testcase classname="PaymentRefundTest" name="full" time="0.298"/>
+    <testcase classname="PaymentRefundTest" name="partial" time="0.341">
+      <failure message="expected: &lt;50.00&gt; but was: &lt;49.99&gt;" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: expected: <50.00> but was: <49.99>
+	at org.junit.jupiter.api.AssertionUtils.fail(AssertionUtils.java:55)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:197)
+	at com.acme.payments.PaymentRefundTest.partial(PaymentRefundTest.java:84)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)]]></failure>
+      <system-out><![CDATA[11:57:02.511 INFO  RefundService - partial refund 50.00 of 99.99 on pay_4471
+11:57:02.513 DEBUG Money - HALF_DOWN rounding applied to 49.995]]></system-out>
+    </testcase>
+    <testcase classname="PaymentRefundTest" name="rejectsOverRefund" time="0.326"/>
+  </testsuite>
+  <testsuite name="com.acme.payments.LedgerTest" tests="2" failures="0" errors="0" skipped="0" time="0.412" timestamp="2026-10-10T11:57:03" hostname="runner-7f9c2">
+    <testcase classname="LedgerTest" name="rounding" time="0.118"/>
+    <testcase classname="LedgerTest" name="doubleEntryBalances" time="0.294"/>
+  </testsuite>
+</testsuites>

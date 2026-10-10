@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {"driver": {"name": "gitleaks", "semanticVersion": "8.18.4", "informationUri": "https://github.com/gitleaks/gitleaks", "rules": []}},
+      "invocations": [{"executionSuccessful": true, "endTimeUtc": "2026-10-10T11:56:58Z"}],
+      "results": []
+    }
+  ]
+}
