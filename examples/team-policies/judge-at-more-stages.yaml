@@ -1,0 +1,11 @@
+# A team can judge a check at a stage where the baseline doesn't judge it at all.
+# The baseline has no effect there, so any effect counts as stricter and is accepted.
+
+on_fail:
+  tests.integration: {build: block}          # baseline only judges it at integration and prod-deploy
+  static.quality: {integration: validate}    # baseline only judges it at pr and build
+  tests.component: {integration: block}      # baseline judges it at pr, build and prod-deploy
+
+extra_checks:
+  build:
+    tests.integration: {deadline: 30, on_missing: warn}

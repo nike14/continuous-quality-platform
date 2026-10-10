@@ -1,0 +1,31 @@
+{
+  "about": "The same production state, but the deploy is a fix (fix_ticket). The error budget and incident rules let fixes through; the fix itself is recorded as a warning.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "prod-deploy",
+    "tier": "tier-1",
+    "evidence": {},
+    "missing": [],
+    "team": {},
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null,
+    "runtime": {
+      "error_budget_remaining": 0,
+      "health_fresh": true,
+      "incident": "SEV2",
+      "rolled_back_recently": false,
+      "freeze": false
+    },
+    "fix": true,
+    "fix_ticket": "PAY-88"
+  },
+  "expect": [
+    {
+      "effect": "warn",
+      "message": "released as a fix under PAY-88",
+      "rule": "baseline.fix_release"
+    }
+  ]
+}

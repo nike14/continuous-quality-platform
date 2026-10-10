@@ -1,0 +1,15 @@
+{
+  "about": "A developer (no cqp_role) tries to switch a rule off for a week. Only the platform team may, for at most 72 hours.",
+  "rule": "kill_errors",
+  "input": {
+    "kill": {
+      "rule": "baseline.tests.unit",
+      "hours": 168
+    },
+    "role": null
+  },
+  "expect": [
+    "a kill switch lasts at most 72 hours",
+    "only the platform team can switch off rules"
+  ]
+}

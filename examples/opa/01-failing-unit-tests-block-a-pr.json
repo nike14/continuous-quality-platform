@@ -1,0 +1,36 @@
+{
+  "about": "A failing unit test at the PR stage: the baseline's on_fail says block. The finding names the test, so the MR comment can too.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "pr",
+    "tier": "tier-1",
+    "evidence": {
+      "tests.unit": {
+        "kind": "outcome",
+        "status": "fail",
+        "payload": {
+          "failed": 1,
+          "failing": [
+            "PaymentRefundTest.partial"
+          ]
+        }
+      }
+    },
+    "missing": [],
+    "team": {},
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "block",
+      "items": [
+        "PaymentRefundTest.partial"
+      ],
+      "message": "tests.unit failed: PaymentRefundTest.partial",
+      "rule": "baseline.tests.unit"
+    }
+  ]
+}

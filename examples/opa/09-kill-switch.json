@@ -1,0 +1,40 @@
+{
+  "about": "The platform team switched off baseline.tests.contract (a bad rule release). Its findings only warn, everywhere, and say why.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "build",
+    "tier": "tier-1",
+    "evidence": {
+      "tests.contract": {
+        "kind": "outcome",
+        "status": "fail",
+        "payload": {
+          "failing": [
+            "ledger-service > posts a refund"
+          ]
+        }
+      }
+    },
+    "missing": [],
+    "team": {},
+    "waivers": [],
+    "kill_switches": [
+      {
+        "rule": "baseline.tests.contract",
+        "reason": "PLAT-9 broken broker"
+      }
+    ],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "warn",
+      "items": [
+        "ledger-service > posts a refund"
+      ],
+      "message": "tests.contract failed: ledger-service > posts a refund (rule switched off: PLAT-9 broken broker)",
+      "rule": "baseline.tests.contract"
+    }
+  ]
+}

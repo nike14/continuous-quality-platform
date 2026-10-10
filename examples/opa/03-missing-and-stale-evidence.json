@@ -1,0 +1,37 @@
+{
+  "about": "Build stage: the secrets scan never reported, and the SCA result is older than its 7-day max_age. Both use on_missing from expectations.yaml (CQP works out `missing` before asking OPA).",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "build",
+    "tier": "tier-1",
+    "evidence": {},
+    "missing": [
+      {
+        "check": "scan.secrets",
+        "on_missing": "block"
+      },
+      {
+        "check": "scan.sca",
+        "on_missing": "block",
+        "stale": true
+      }
+    ],
+    "team": {},
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "block",
+      "message": "scan.sca result is too old to count; run it again",
+      "rule": "baseline.evidence_required"
+    },
+    {
+      "effect": "block",
+      "message": "scan.secrets did not report before its deadline",
+      "rule": "baseline.evidence_required"
+    }
+  ]
+}

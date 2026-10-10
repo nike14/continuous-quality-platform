@@ -1,0 +1,49 @@
+{
+  "about": "A security approver waived CVE-2026-1234 under SEC-42. The SCA scan fails on exactly that CVE, so the finding is kept but only warns, and names the ticket.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "build",
+    "tier": "tier-1",
+    "evidence": {
+      "scan.sca": {
+        "kind": "outcome",
+        "status": "fail",
+        "payload": {
+          "by_severity": {
+            "critical": 1,
+            "medium": 1
+          },
+          "failing": [
+            "CVE-2026-1234"
+          ]
+        }
+      }
+    },
+    "missing": [],
+    "team": {},
+    "waivers": [
+      {
+        "rule": "baseline.scan.sca",
+        "items": [
+          "CVE-2026-1234"
+        ],
+        "ticket": "SEC-42",
+        "expires_at": "2026-10-20T00:00:00+00:00"
+      }
+    ],
+    "kill_switches": [],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "warn",
+      "items": [
+        "CVE-2026-1234"
+      ],
+      "message": "scan.sca failed: CVE-2026-1234 (waived until 2026-10-20T00:00:00+00:00, SEC-42)",
+      "rule": "baseline.scan.sca",
+      "waiver": "SEC-42"
+    }
+  ]
+}

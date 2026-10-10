@@ -1,0 +1,23 @@
+{
+  "about": "What `cqp policy check` asks before a team policy is accepted: each cell that loosens a locked baseline rule is an error (the API returns 422 with these).",
+  "rule": "team_policy_errors",
+  "input": {
+    "team": {
+      "on_fail": {
+        "scan.secrets": {
+          "pr": "warn"
+        },
+        "tests.contract": {
+          "integration": "validate"
+        },
+        "tests.e2e": {
+          "integration": "warn"
+        }
+      }
+    }
+  },
+  "expect": [
+    "scan.secrets at pr can't be looser than the organisation baseline (block)",
+    "tests.contract at integration can't be looser than the organisation baseline (block)"
+  ]
+}

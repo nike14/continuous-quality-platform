@@ -1,0 +1,44 @@
+{
+  "about": "A team policy that loosens a locked cell is refused when published (see 14). Even if one got through, effect_for ignores it: failing secrets scans still block the PR.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "pr",
+    "tier": "tier-1",
+    "evidence": {
+      "scan.secrets": {
+        "kind": "outcome",
+        "status": "fail",
+        "payload": {
+          "by_level": {
+            "error": 1
+          },
+          "failing": [
+            "a1b2c3"
+          ]
+        }
+      }
+    },
+    "missing": [],
+    "team": {
+      "on_fail": {
+        "scan.secrets": {
+          "pr": "warn"
+        }
+      }
+    },
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "block",
+      "items": [
+        "a1b2c3"
+      ],
+      "message": "scan.secrets failed: a1b2c3",
+      "rule": "baseline.scan.secrets"
+    }
+  ]
+}

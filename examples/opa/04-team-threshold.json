@@ -1,0 +1,39 @@
+{
+  "about": "The team's limit: p95 must stay under 150 ms (examples/team-policy.yaml). The load test reports 212 ms, so the team's threshold finding fires with the team's effect.",
+  "rule": "findings",
+  "input": {
+    "service": "checkout-web",
+    "stage": "integration",
+    "tier": "tier-2",
+    "evidence": {
+      "perf.load": {
+        "kind": "measurement",
+        "status": "pass",
+        "payload": {
+          "metric": "p95_ms",
+          "value": 212,
+          "unit": "ms"
+        }
+      }
+    },
+    "missing": [],
+    "team": {
+      "thresholds": {
+        "perf.load": {
+          "max": 150,
+          "effect": "validate"
+        }
+      }
+    },
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "validate",
+      "message": "perf.load is 212 ms, over the team's limit of 150",
+      "rule": "team.perf.load.threshold"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "about": "Failing contract tests only warn at the PR (the provider may not have deployed yet), but the same failure blocks at build. Here: the PR.",
+  "rule": "findings",
+  "input": {
+    "service": "payments-api",
+    "stage": "pr",
+    "tier": "tier-1",
+    "evidence": {
+      "tests.contract": {
+        "kind": "outcome",
+        "status": "fail",
+        "payload": {
+          "failing": [
+            "ledger-service > posts a refund"
+          ]
+        }
+      }
+    },
+    "missing": [],
+    "team": {},
+    "waivers": [],
+    "kill_switches": [],
+    "break_glass": null
+  },
+  "expect": [
+    {
+      "effect": "warn",
+      "items": [
+        "ledger-service > posts a refund"
+      ],
+      "message": "tests.contract failed: ledger-service > posts a refund",
+      "rule": "baseline.tests.contract"
+    }
+  ]
+}

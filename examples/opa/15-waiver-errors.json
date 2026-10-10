@@ -1,0 +1,17 @@
+{
+  "about": "An approver (not security) asks to waive a scan rule for 45 days without naming the CVEs. Every reason it's refused comes back at once.",
+  "rule": "waiver_errors",
+  "input": {
+    "waiver": {
+      "rule": "baseline.scan.sca",
+      "days": 45,
+      "items": []
+    },
+    "role": "approver"
+  },
+  "expect": [
+    "a scan waiver must name the items it accepts, e.g. a CVE ID",
+    "a waiver lasts at most 30 days",
+    "baseline security rules need a security approver"
+  ]
+}
