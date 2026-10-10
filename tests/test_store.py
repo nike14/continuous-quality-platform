@@ -44,6 +44,13 @@ def test_latest_attempt_wins_and_commit_results_reach_the_image(conn):
     assert set(result) == {"build.provenance", "tests.unit", "scan.sca"}
 
 
+def test_a_late_upload_from_an_older_run_does_not_replace_a_newer_run(conn):
+    # The rerun's pass is stored first; the first run's failure arrives after it (upload retries).
+    save(conn, signal("try-2", status="pass", at="2026-10-07T10:05:00Z"))
+    save(conn, signal("try-1", status="fail", at="2026-10-07T10:00:00Z"))
+    assert latest(conn, "payments-api", None, commit="9f3c")["tests.unit"]["event_id"] == "try-2"
+
+
 # Minimal stand-ins for a Kafka message and consumer: only what process() uses.
 class Msg:
     def __init__(self, event):
@@ -98,6 +105,26 @@ def test_bad_event_goes_to_dlq_and_is_not_stored(conn):
     assert parked[0][0] == DLQ_TOPIC
     assert conn.execute("SELECT count(*) FROM signals").fetchone()[0] == 0
     assert len(consumer.committed) == 1  # parked, so we move on
+
+
+class RawMsg(Msg):
+    def __init__(self, value: bytes):
+        self._value = value
+
+
+@pytest.mark.parametrize(
+    "msg",
+    [
+        Msg({**RAW, "payload": None}),  # a CI pact upload: no parsed payload
+        Msg({k: v for k, v in RAW.items() if k != "check"}),  # a field missing
+        Msg(["not", "an", "event"]),
+        RawMsg(b"{not json"),
+    ],
+)
+def test_an_event_that_can_never_be_stored_is_parked_not_retried_forever(conn, msg):
+    consumer, parked = Consumer(), []
+    process(msg, conn, consumer, lambda *a: parked.append(a))
+    assert parked[0][0] == DLQ_TOPIC and len(consumer.committed) == 1
 
 
 def test_a_dlq_write_that_fails_is_not_committed(conn):

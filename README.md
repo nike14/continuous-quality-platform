@@ -97,7 +97,7 @@ Tool webhook ──────────┘      │ verify sender
 
 | Path | How it works | Status |
 | --- | --- | --- |
-| **CI jobs** | The golden-path template runs `cqp report` after each job. It uploads the files the job already produced (JUnit, SARIF, Pact, k6). Teams don't change their tests. | Built |
+| **CI jobs** | The golden-path template runs `cqp report` after each job. It uploads the files the job already produced (JUnit, SARIF, CycloneDX, k6). Teams don't change their tests. Formats the store can't parse are refused with a 422; Pact results come through the Pact Broker webhook. | Built |
 | **Tools outside CI** | The tool sends a signed webhook to `/v1/hooks/<tool>`. One small adapter per tool turns its payload into events. | Built for Pact Broker |
 | **Production** | The deploy system and monitoring send events through the same webhook path. | Next: add adapters |
 
@@ -128,6 +128,9 @@ Every result becomes one raw event on `cqp.signals.raw`:
   the same ID**, so downstream stores it once.
 - Kafka key = `service:commit`, so one change's events stay in order on one partition.
 - The raw file goes to storage and the event only carries a reference to it.
+- `observed_at` is when the result was produced: for CI, when the job's token was issued (`iat`);
+  for webhooks, an optional `observed_at` in the body. Without one it is the arrival time.
+  "Newest result wins" orders by it, so a late upload from an older run can't replace a newer one.
 
 ### When things fail
 
@@ -151,8 +154,8 @@ Kafka cqp.signals.raw ──► store worker ──► normalize ──► Postg
 | Format | Kind | What is kept |
 | --- | --- | --- |
 | JUnit | outcome | total, failed, skipped, names of failing tests |
-| SARIF | findings | counts by level, a fingerprint per finding |
-| CycloneDX | findings | counts by severity, vulnerability IDs |
+| SARIF | findings | counts by level, a fingerprint per finding, the error-level ones as `failing` |
+| CycloneDX | findings | counts by severity, vulnerability IDs, the critical and high ones as `failing` |
 | k6 | measurement | p95 latency in ms |
 | Pact (webhook) | outcome | the adapter's pass/fail as is |
 | Build provenance | outcome | the image digest |
@@ -167,8 +170,8 @@ failed. Fingerprints let policy tell a new finding from an old one. Pass/fail ag
   retried upload or a re-read Kafka message is harmless.
 - `builds` table: the build's provenance signal records which image came from which commit. Results
   recorded against the commit (unit tests run before the build) therefore count for the image.
-- `latest(service, image)` returns the newest run's result per check, so a rerun replaces the
-  earlier attempt. If one run sent several reports for a check (two test modules), any failure
+- `latest(service, image)` returns the newest run's result per check (by `observed_at`), so a
+  rerun replaces the earlier attempt, whichever upload arrives first. If one run sent several reports for a check (two test modules), any failure
   among them wins; the event ID includes a hash of the files, so those reports never collide.
 - Uploads are capped at 50 MB in total (`CQP_MAX_UPLOAD_MB`); bigger ones get a 413.
 
@@ -176,8 +179,8 @@ failed. Fingerprints let policy tell a new finding from an old one. Pass/fail ag
 
 - The worker commits the Kafka offset **only after** the database write. A crash in between means
   the message is read again, and the idempotent insert makes that safe.
-- Events that can never be processed (unknown format, unreadable report, JSON of the wrong shape)
-  go to `cqp.signals.dlq`. They are not stored, so they count as **missing** evidence, never as
+- Events that can never be processed (unknown format, unreadable report, JSON of the wrong shape,
+  a message that isn't an event at all) go to `cqp.signals.dlq`. They are not stored, so they count as **missing** evidence, never as
   a pass. The DLQ write must be acknowledged by Kafka before the offset is committed; if it
   isn't, the worker restarts and reads the message again, so nothing is lost.
 - Database or Kafka errors crash the worker on purpose. The orchestrator restarts it and it resumes
@@ -212,7 +215,10 @@ there is one, and the event IDs this pipeline uploaded. The commit comes from th
    gets the same decision back, so there's no new row, MR edit or status post each time.
 4. **Rules.** `policy/baseline.rego` runs in an OPA sidecar. A failing check gets the effect
    the stage matrix gives it (for example, failing unit tests block a PR). A missing check gets its
-   `on_missing` effect. Each finding has a rule name and a plain message. If OPA has lost the
+   `on_missing` effect. At `prod-deploy` every check it expects is judged on the image's own
+   evidence, and failing is never treated better than missing, so an image whose build was
+   blocked can't be deployed around it (teams can't loosen these cells). Each finding has a rule
+   name and a plain message. If OPA has lost the
    rules (it restarted), CQP reloads them and asks again; it never reads "no answer" as "no
    findings", which would let everything through.
 5. **Outcome.** The strictest finding wins: `PROCEED`, `PROCEED_WITH_WARNING`,
@@ -299,7 +305,11 @@ applies:
 | Organisation-wide freeze | block (even fixes; emergencies use break-glass) | `baseline.change_freeze` |
 | Health missing or older than 5 min | validate for tier-1, warn otherwise | `baseline.production_health` |
 
-Health is "fresh" if the newest SLO update arrived within 5 minutes. Services with no SLO data
+Each incident is tracked by its own ID: resolving one doesn't clear another that is still open,
+and the most severe open one is reported. Every runtime event may carry `observed_at`, so a late
+delivery doesn't overwrite newer state.
+
+Health is "fresh" if the newest SLO update was observed within 5 minutes. Services with no SLO data
 are treated as stale, so tier-1 production deploys need an approval until their monitoring
 reports in.
 
@@ -339,15 +349,20 @@ thresholds:              # limits on measurements
 A waiver accepts a known finding for a while: "this CVE has no fix yet, ticket SEC-118".
 
 ```bash
-cqp waiver --service ledger-service --rule baseline.scan.sca \
+cqp waiver --service ledger-service --rule baseline.scan.sca --item CVE-2026-1234 \
   --reason "no fixed version yet" --ticket SEC-118 --days 7
 ```
+
+- `--item` (repeatable) names exactly what is accepted: CVE IDs, finding fingerprints or test
+  names, as listed in the finding's `items`. The waiver applies only while everything failing is
+  among them, so a new critical CVE blocks again. Without items, a waiver covers the whole rule.
 
 - A waived finding still shows in the decision and MR comment, but only warns:
   `scan.sca failed: {...} (waived until 2026-10-16, SEC-118)`.
 - Rules, also in `baseline.rego`:
-  - only approvers can create waivers;
+  - only approvers can create waivers, for services their repo owns (security: any service);
   - security rules (SCA, secrets, contracts) need a security approver;
+  - SCA and secrets waivers must name their items;
   - at most 30 days, and they expire on their own;
   - missing evidence and a change freeze can't be waived (those need break-glass).
 - Active waivers are part of the decision input, so a replay sees exactly the waivers that applied.

@@ -23,15 +23,16 @@ def put(api, body, token="good-token", service="payments-api", dry_run=False):
     )
 
 
-def waive(api, rule, token="approver-token", days=7):
+def waive(api, rule, token="approver-token", days=7, items=None, service="payments-api"):
     return api.post(
         "/v1/waivers",
         json={
-            "service": "payments-api",
+            "service": service,
             "rule": rule,
             "days": days,
             "reason": "fix in progress",
             "ticket": "PAY-7",
+            "items": items or [],
         },
         headers=bearer(token),
     )
@@ -128,9 +129,52 @@ def test_waiver_downgrades_until_it_expires(setup, conn, now):
 
 def test_security_rules_need_a_security_approver(setup, conn):
     api, _, _ = setup
-    assert waive(api, "baseline.scan.sca").status_code == 403
-    assert waive(api, "baseline.scan.sca", token="good-token").status_code == 403
-    assert waive(api, "baseline.scan.sca", token="security-token").status_code == 201
+    cve = ["CVE-2026-1234"]
+    assert waive(api, "baseline.scan.sca", items=cve).status_code == 403
+    assert waive(api, "baseline.scan.sca", token="good-token", items=cve).status_code == 403
+    assert waive(api, "baseline.scan.sca", token="security-token", items=cve).status_code == 201
+
+
+def test_a_scan_waiver_must_name_what_it_accepts(setup, conn):
+    api, _, _ = setup
+    r = waive(api, "baseline.scan.sca", token="security-token")
+    assert r.status_code == 403 and "must name the items" in r.text
+
+
+def build_with_vulnerabilities(conn, cves):
+    for check in ("tests.unit", "tests.contract", "scan.secrets"):
+        record(conn, check)
+    payload = {"by_severity": {"critical": len(cves)}, "failing": cves}
+    record(conn, "scan.sca", "fail", payload=payload)
+
+
+def test_a_waiver_accepts_the_named_cve(setup, conn):
+    api, _, _ = setup
+    build_with_vulnerabilities(conn, ["CVE-2026-1234"])
+    waive(api, "baseline.scan.sca", token="security-token", items=["CVE-2026-1234"])
+    d = ask(api, "build")
+    assert d["outcome"] == "PROCEED_WITH_WARNING" and d["findings"][0]["waiver"] == "PAY-7"
+
+
+def test_a_new_cve_is_not_covered_by_a_waiver_for_another(setup, conn):
+    # Regression: a waiver matched on the rule alone, so it silently accepted any new CVE.
+    api, _, _ = setup
+    build_with_vulnerabilities(conn, ["CVE-2026-1234", "CVE-2026-9999"])
+    waive(api, "baseline.scan.sca", token="security-token", items=["CVE-2026-1234"])
+    d = ask(api, "build")
+    assert d["outcome"] == "BLOCKED" and "waiver" not in d["findings"][0]
+    assert d["findings"][0]["items"] == ["CVE-2026-1234", "CVE-2026-9999"]
+
+
+def test_an_approver_can_only_waive_for_services_their_repo_owns(setup, conn):
+    api, _, _ = setup
+    rule = "team.perf.load.threshold"
+    assert waive(api, rule, token="other-approver-token").status_code == 403
+    # Security approves across the organisation.
+    assert waive(api, rule, token="security-token", service="checkout-web").status_code == 201
+    waiver_id = waive(api, rule).json()["waiver_id"]
+    r = api.delete(f"/v1/waivers/{waiver_id}", headers=bearer("other-approver-token"))
+    assert r.status_code == 403
 
 
 def test_revoked_waiver_stops_applying(setup, conn):

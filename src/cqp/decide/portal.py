@@ -29,7 +29,8 @@ async function call(method, path, body) {
 }
 function createWaiver(form) {
   const f = Object.fromEntries(new FormData(form));
-  call('POST', '/v1/waivers', {...f, days: Number(f.days)});
+  const items = f.items.split(',').map(s => s.trim()).filter(Boolean);
+  call('POST', '/v1/waivers', {...f, items, days: Number(f.days)});
   return false;
 }
 """
@@ -77,10 +78,12 @@ def render(view: dict, catalog: dict) -> str:
 
     # Each table as (rows, [(field, column heading), ...]).
     waivers = _table(
-        view["waivers"],
+        # A waiver without items accepts any finding of its rule.
+        [{**w, "items": ", ".join(w.get("items") or []) or "all"} for w in view["waivers"]],
         [
             ("service", "Service"),
             ("rule", "Rule"),
+            ("items", "Accepts"),
             ("ticket", "Ticket"),
             ("reason", "Reason"),
             ("approver", "Approver"),
@@ -138,6 +141,7 @@ def render(view: dict, catalog: dict) -> str:
 <form onsubmit="return createWaiver(this)">
   <input name="service" placeholder="service" required>
   <input name="rule" placeholder="baseline.scan.sca" required>
+  <input name="items" placeholder="CVE-2026-1234, ... (scan rules)">
   <input name="reason" placeholder="reason" required>
   <input name="ticket" placeholder="ticket" required>
   <input name="days" type="number" min="1" max="30" value="14" required>

@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 RAW_TOPIC = "cqp.signals.raw"
 
@@ -23,7 +23,9 @@ Check = Literal[
     "perf.load",
     "build.provenance",
 ]
-Format = Literal["junit", "sarif", "cyclonedx", "pact", "k6", "json"]
+# Formats a CI job may upload: each has a parser in the store worker. Pact results come from the
+# Pact Broker webhook instead. "json" is only for build provenance, which needs no parsing.
+Format = Literal["junit", "sarif", "cyclonedx", "k6", "json"]
 
 
 class ReportMeta(BaseModel):
@@ -33,6 +35,13 @@ class ReportMeta(BaseModel):
     check: Check
     format: Format
     image: str | None = None
+
+    @model_validator(mode="after")
+    def json_only_for_provenance(self) -> "ReportMeta":
+        """Refused here with a 422, rather than accepted and parked in the DLQ later."""
+        if self.format == "json" and self.check != "build.provenance":
+            raise ValueError("format json is only for build.provenance")
+        return self
 
 
 def event_id(
@@ -58,8 +67,13 @@ def raw_event(
     image: str | None = None,
     payload: dict | None = None,
     content: str = "",
+    observed_at: str | None = None,
 ) -> dict:
-    """Builds the event that goes on the raw Kafka topic."""
+    """Builds the event that goes on the raw Kafka topic.
+
+    observed_at is when the result was produced, if the sender knows; otherwise when it arrived.
+    """
+    received_at = datetime.now(UTC).isoformat()
     return {
         "event_id": event_id(producer, check, service, commit, run, content),
         "producer": producer,
@@ -73,5 +87,8 @@ def raw_event(
         "image": image,
         "payload": payload,
         "raw_ref": None,  # set by the ingestion API once the files are saved
-        "received_at": datetime.now(UTC).isoformat(),  # "newest result wins" uses this
+        # "Newest result wins" orders by observed_at, so a late upload of an older run can't
+        # replace a newer one. received_at measures how long evidence takes to arrive.
+        "observed_at": observed_at or received_at,
+        "received_at": received_at,
     }

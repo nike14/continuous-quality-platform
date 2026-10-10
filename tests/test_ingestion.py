@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from conftest import CLAIMS
 
 AUTH = {"Authorization": "Bearer good-token"}
@@ -34,6 +35,14 @@ def test_report_is_stored_and_published(client, published, stored):
     assert event["check"] == "tests.unit" and event["image"] == "sha256:ab12"
     assert event["raw_ref"] == f"mem://{event['event_id']}"
     assert stored[event["event_id"]][0][0] == "junit.xml"
+
+
+def test_a_report_is_dated_when_its_job_started_not_when_it_arrived(client, published):
+    meta = {"service": "payments-api", "check": "tests.unit", "format": "junit"}
+    upload(client, meta, headers={"Authorization": "Bearer issued-token"})
+    event = published[0][2]
+    assert event["observed_at"] == "2026-10-07T10:00:00+00:00"
+    assert event["received_at"] > event["observed_at"]
 
 
 def test_identity_comes_from_token_not_payload(client, published):
@@ -72,6 +81,15 @@ def test_bad_token_is_rejected(client, published):
 
 def test_unknown_check_is_rejected(client, published):
     r = upload(client, {"service": "s", "check": "tests.vibes", "format": "junit"})
+    assert r.status_code == 422 and published == []
+
+
+@pytest.mark.parametrize(
+    "check, fmt",
+    [("tests.contract", "pact"), ("tests.unit", "json")],  # no parser for either from CI
+)
+def test_a_format_the_store_cannot_read_is_refused_up_front(client, published, check, fmt):
+    r = upload(client, {"service": "payments-api", "check": check, "format": fmt})
     assert r.status_code == 422 and published == []
 
 

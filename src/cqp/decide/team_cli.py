@@ -69,12 +69,14 @@ def waiver(
     url: str,
     token: str,
     client: httpx.Client,
+    items: list[str] | None = None,
 ) -> int:
     """`cqp waiver`: asks CQP to accept a finding for a number of days."""
+    body = {"service": service, "rule": rule, "reason": reason, "ticket": ticket, "days": days}
     return create(
         "/v1/waivers",
-        {"service": service, "rule": rule, "reason": reason, "ticket": ticket, "days": days},
-        ("waiver_id", "rule", "ticket", "expires_at"),
+        {**body, "items": items or []},
+        ("waiver_id", "rule", "items", "ticket", "expires_at"),
         url,
         token,
         client,

@@ -35,10 +35,17 @@ TOKENS = {
     "branch-token": {**CLAIMS, "ref_protected": "false"},
     "other-repo-token": {**CLAIMS, "project_path": "checkout/checkout-web"},
     "approver-token": {**CLAIMS, "cqp_role": "approver", "user_login": "lead"},
+    "other-approver-token": {
+        **CLAIMS,
+        "project_path": "checkout/checkout-web",
+        "cqp_role": "approver",
+        "user_login": "checkout-lead",
+    },
     "security-token": {**CLAIMS, "cqp_role": "security", "user_login": "secops"},
     "platform-token": {**CLAIMS, "cqp_role": "platform", "user_login": "platform-oncall"},
     "oncall-token": {**CLAIMS, "cqp_role": "oncall", "user_login": "sre"},
     "retried-job-token": {**CLAIMS, "job_id": 4413},
+    "issued-token": {**CLAIMS, "iat": 1791367200},  # 2026-10-07 10:00 UTC, when the job started
     "no-sha-token": {k: v for k, v in CLAIMS.items() if k != "sha"},
     "deployer-token": {**CLAIMS, "project_path": "platform/deployer", "sha": "d" * 40},
     "deployer-branch-token": {

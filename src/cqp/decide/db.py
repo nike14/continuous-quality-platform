@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS waivers (
 CREATE INDEX IF NOT EXISTS waivers_by_service ON waivers (service, expires_at);
 -- Added after the table; IF NOT EXISTS keeps existing local databases working.
 ALTER TABLE waivers ADD COLUMN IF NOT EXISTS reminded_at timestamptz;
+-- What exactly is accepted (CVE IDs, fingerprints); empty means the whole rule.
+ALTER TABLE waivers ADD COLUMN IF NOT EXISTS items jsonb NOT NULL DEFAULT '[]';
 
 -- Platform team switches off a misbehaving rule everywhere, for a few hours.
 CREATE TABLE IF NOT EXISTS kill_switches (
@@ -179,14 +181,26 @@ def runtime(conn, service: str, now: datetime) -> dict:
     rows = conn.execute(
         """SELECT DISTINCT ON (service, check_name) service, check_name, payload, observed_at
            FROM signals
-           WHERE service IN (%s, '*')
-             AND check_name IN ('runtime.slo', 'runtime.incident', 'org.freeze')
+           WHERE service IN (%s, '*') AND check_name IN ('runtime.slo', 'org.freeze')
            ORDER BY service, check_name, observed_at DESC""",
         (service,),
     ).fetchall()
     newest = {(s, c): (p, t) for s, c, p, t in rows}
-    slo, incident = newest.get((service, "runtime.slo")), newest.get((service, "runtime.incident"))
-    freeze = newest.get(("*", "org.freeze"))
+    slo, freeze = newest.get((service, "runtime.slo")), newest.get(("*", "org.freeze"))
+    # Each incident's own latest state, so resolving one doesn't hide another that is still open.
+    # On a tie, resolved wins: an incident doesn't reopen under the same event time.
+    open_severities = [
+        r[0]
+        for r in conn.execute(
+            """SELECT payload->>'severity' FROM (
+                 SELECT DISTINCT ON (payload->>'id') payload
+                 FROM signals WHERE service = %s AND check_name = 'runtime.incident'
+                 ORDER BY payload->>'id', observed_at DESC, payload->>'state' = 'resolved' DESC
+               ) newest_per_incident
+               WHERE payload->>'state' = 'open'""",
+            (service,),
+        )
+    ]
     # Any failed canary for this service in the last day means the next deploy should go slower.
     rolled_back = conn.execute(
         "SELECT EXISTS (SELECT 1 FROM signals WHERE service = %s AND check_name = 'deploy.canary' "
@@ -198,9 +212,8 @@ def runtime(conn, service: str, now: datetime) -> dict:
         "error_budget_remaining": slo[0]["error_budget_remaining"] if slo is not None else None,
         "health_observed_at": slo[1].isoformat() if slo is not None else None,
         "health_fresh": slo is not None and now - slo[1] <= HEALTH_FRESHNESS,
-        "incident": incident[0]["severity"]
-        if incident and incident[0]["state"] == "open"
-        else None,
+        # The most severe open one (sev1 sorts before sev2), or None.
+        "incident": min(open_severities) if open_severities else None,
         "rolled_back_recently": rolled_back,
         "freeze": bool(freeze and freeze[0]["active"]),
     }
@@ -235,8 +248,8 @@ def insert_waiver(conn, w: dict) -> None:
     # Expiry is fixed when it's created; to go longer, someone makes a new waiver.
     conn.execute(
         """INSERT INTO waivers (waiver_id, service, rule, reason, ticket, approver,
-                                created_at, expires_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                                created_at, expires_at, items)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             w["waiver_id"],
             w["service"],
@@ -246,6 +259,7 @@ def insert_waiver(conn, w: dict) -> None:
             w["approver"],
             w["created_at"],
             w["expires_at"],
+            Jsonb(w.get("items", [])),
         ),
     )
 
@@ -254,13 +268,21 @@ def active_waivers(conn, service: str, now: datetime) -> list[dict]:
     """Waivers for a service that haven't expired or been revoked."""
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
-            """SELECT waiver_id, rule, ticket, reason, approver, expires_at FROM waivers
+            """SELECT waiver_id, rule, ticket, reason, approver, expires_at, items FROM waivers
                WHERE service = %s AND expires_at > %s AND revoked_at IS NULL
                ORDER BY created_at""",
             (service, now),
         ).fetchall()
     # Dates as text: this goes into the policy input, which is stored as plain JSON for replay.
     return [{**r, "expires_at": r["expires_at"].isoformat()} for r in rows]
+
+
+def waiver_service(conn, waiver_id: str) -> str | None:
+    """The service an active waiver is for, or None if there is no such active waiver."""
+    row = conn.execute(
+        "SELECT service FROM waivers WHERE waiver_id = %s AND revoked_at IS NULL", (waiver_id,)
+    ).fetchone()
+    return row[0] if row else None
 
 
 def revoke_waiver(conn, waiver_id: str, now: datetime) -> bool:
@@ -377,7 +399,7 @@ def portal_view(conn, now: datetime) -> dict:
         q = lambda sql, *a: cur.execute(sql, a).fetchall()  # noqa: E731
         return {
             "waivers": q(
-                """SELECT waiver_id, service, rule, ticket, reason, approver, expires_at
+                """SELECT waiver_id, service, rule, items, ticket, reason, approver, expires_at
                    FROM waivers
                             WHERE revoked_at IS NULL AND expires_at > %s ORDER BY expires_at""",
                 now,

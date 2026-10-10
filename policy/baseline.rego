@@ -8,10 +8,11 @@ import rego.v1
 
 # Effect when a check FAILS at a stage. A check not listed for a stage isn't judged there.
 # Missing evidence uses on_missing from expectations.yaml instead.
+# prod-deploy judges every check it expects: failing evidence must never do better than none.
 on_fail := {
-	"tests.unit": {"pr": "block", "build": "block"},
-	"tests.contract": {"pr": "warn", "build": "block", "integration": "block"},
-	"tests.integration": {"integration": "block"},
+	"tests.unit": {"pr": "block", "build": "block", "prod-deploy": "block"},
+	"tests.contract": {"pr": "warn", "build": "block", "integration": "block", "prod-deploy": "block"},
+	"tests.integration": {"integration": "block", "prod-deploy": "block"},
 	"tests.e2e": {"pr": "warn", "integration": "validate", "prod-deploy": "warn"},
 	"scan.sca": {"pr": "warn", "build": "block", "integration": "block", "prod-deploy": "block"},
 	"scan.secrets": {"pr": "block", "build": "block", "prod-deploy": "block"},
@@ -20,7 +21,9 @@ on_fail := {
 
 # Organisation-wide cells: a team policy may make them stricter, never looser.
 locked := {
-	"tests.contract": {"integration"},
+	"tests.unit": {"prod-deploy"},
+	"tests.contract": {"integration", "prod-deploy"},
+	"tests.integration": {"prod-deploy"},
 	"scan.sca": {"build", "integration", "prod-deploy"},
 	"scan.secrets": {"pr", "build", "prod-deploy"},
 }
@@ -32,6 +35,10 @@ rank := {"warn": 1, "validate": 2, "block": 3}
 security_rules := {"baseline.tests.contract", "baseline.scan.sca", "baseline.scan.secrets"}
 
 not_waivable := {"baseline.evidence_required", "baseline.change_freeze"}
+
+# A waiver on these must name the items it accepts (CVE IDs, finding fingerprints), so a new
+# critical CVE found while it is active still blocks.
+item_rules := {"baseline.scan.sca", "baseline.scan.secrets"}
 
 # ---- Decisions: raw findings, then kill switches, waivers and break-glass ----
 
@@ -58,6 +65,8 @@ raw contains f if {
 		"rule": sprintf("baseline.%s", [check]),
 		"effect": effect_for(check),
 		"message": sprintf("%s failed: %s", [check, detail(e)]),
+		# What made it fail (test names, CVE IDs, fingerprints), which a waiver can name.
+		"items": object.get(e.payload, "failing", []),
 	}
 }
 
@@ -171,10 +180,21 @@ apply_waiver(f) := object.union(f, {
 	"message": sprintf("%s (waived until %s, %s)", [f.message, w.expires_at, w.ticket]),
 }) if {
 	not f.rule in not_waivable
-	ws := [w | some w in input.waivers; w.rule == f.rule]
+	ws := [w | some w in input.waivers; w.rule == f.rule; covers(w, f)]
 	count(ws) > 0
 	w := ws[0] # several can match; quote the oldest (input is sorted by created_at)
 } else := f
+
+# A waiver without items accepts any finding of its rule.
+covers(w, f) if count(object.get(w, "items", [])) == 0
+
+# One with items accepts a finding only if everything failing is among them: one new CVE and
+# the finding blocks again.
+covers(w, f) if {
+	failing := object.get(f, "items", [])
+	count(failing) > 0
+	every i in failing { i in w.items }
+}
 
 # ---- Checking a team policy file before it is published ----
 
@@ -197,6 +217,11 @@ waiver_errors contains "baseline security rules need a security approver" if {
 }
 
 waiver_errors contains "a waiver lasts at most 30 days" if input.waiver.days > 30
+
+waiver_errors contains "a scan waiver must name the items it accepts, e.g. a CVE ID" if {
+	input.waiver.rule in item_rules
+	count(object.get(input.waiver, "items", [])) == 0
+}
 
 # ---- Checking a kill switch or break-glass request ----
 

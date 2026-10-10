@@ -30,19 +30,24 @@ def junit(files: Files):
 
 
 def sarif(files: Files):
-    """Static-analysis results: counts by level, plus fingerprints."""
+    """Static-analysis results: counts by level, plus fingerprints (and those that fail)."""
     by_level: Counter[str] = Counter()
     fingerprints: list[str] = []
+    failing: list[str] = []
     for _, data in files:
         for run in json.loads(data)["runs"]:
             for r in run.get("results", []):
-                by_level[r.get("level", "warning")] += 1
+                level = r.get("level", "warning")
+                by_level[level] += 1
                 # Prefer the tool's own fingerprint so "new vs existing" survives line shifts.
-                fingerprints.append(next(iter(r.get("fingerprints", {}).values()), r.get("ruleId")))
+                fp = next(iter(r.get("fingerprints", {}).values()), r.get("ruleId"))
+                fingerprints.append(fp)
+                if level == "error":
+                    failing.append(fp)  # what a waiver names to accept exactly this finding
     return (
         "findings",
-        "fail" if by_level["error"] else "pass",
-        {"by_level": dict(by_level), "fingerprints": fingerprints},
+        "fail" if failing else "pass",
+        {"by_level": dict(by_level), "fingerprints": fingerprints, "failing": failing},
     )
 
 
@@ -50,16 +55,19 @@ def cyclonedx(files: Files):
     """Vulnerability scan (SBOM): counts by severity, plus CVE IDs."""
     by_severity: Counter[str] = Counter()
     ids: list[str] = []
+    failing: list[str] = []
     for _, data in files:
         for v in json.loads(data).get("vulnerabilities", []):
             # First rating is the scanner's own. Some entries have none at all.
-            by_severity[(v.get("ratings") or [{}])[0].get("severity", "unknown")] += 1
+            severity = (v.get("ratings") or [{}])[0].get("severity", "unknown")
+            by_severity[severity] += 1
             ids.append(v["id"])
-    bad = by_severity["critical"] or by_severity["high"]  # medium and low are reported, not failed
+            if severity in ("critical", "high"):  # medium and low are reported, not failed
+                failing.append(v["id"])  # what a waiver names to accept exactly this CVE
     return (
         "findings",
-        "fail" if bad else "pass",
-        {"by_severity": dict(by_severity), "fingerprints": ids},
+        "fail" if failing else "pass",
+        {"by_severity": dict(by_severity), "fingerprints": ids, "failing": failing},
     )
 
 
@@ -84,11 +92,10 @@ def normalize(event: dict, read_raw) -> dict:
         # Nothing to parse: the event itself is the record that this image came from this commit.
         kind, status, payload = "outcome", "pass", {"image": event["image"]}
     elif event["format"] in WEBHOOK_KINDS:  # webhook adapters already send a parsed payload
-        kind, status, payload = (
-            WEBHOOK_KINDS[event["format"]],
-            event["payload"]["status"],
-            event["payload"],
-        )
+        parsed = event.get("payload")
+        if not isinstance(parsed, dict) or parsed.get("status") not in ("pass", "fail"):
+            raise BadEventError(f"{event['format']} event without a parsed payload")
+        kind, status, payload = WEBHOOK_KINDS[event["format"]], parsed["status"], parsed
     elif event["format"] in PARSERS:
         try:
             kind, status, payload = PARSERS[event["format"]](read_raw(event["raw_ref"]))
@@ -117,5 +124,6 @@ def normalize(event: dict, read_raw) -> dict:
         "producer": event["producer"],
         "payload": payload,
         "raw_ref": event["raw_ref"],
-        "observed_at": event["received_at"],
+        # Events written before observed_at existed only have received_at.
+        "observed_at": event.get("observed_at") or event["received_at"],
     }

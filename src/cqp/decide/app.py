@@ -62,6 +62,9 @@ class WaiverRequest(BaseModel):
     reason: str = Field(min_length=1)
     ticket: str = Field(min_length=1)
     days: int = Field(ge=1)
+    # The exact items accepted (CVE IDs, fingerprints, test names). Empty = the whole rule,
+    # which baseline.rego refuses for scan rules.
+    items: list[str] = []
 
 
 class KillSwitchRequest(BaseModel):
@@ -98,6 +101,13 @@ def create_app(
             return verify_token(authorization.removeprefix("Bearer "))
         except jwt.PyJWTError as e:
             raise HTTPException(401, "invalid token") from e
+
+    def check_waiver_owner(claims: dict, service: str) -> None:
+        """An approver acts for the services their repo owns; security for every service."""
+        if claims.get("cqp_role") == "security":
+            return
+        if not policy.catalog.owns(claims.get("project_path"), service):
+            raise HTTPException(403, f"{claims.get('project_path')} doesn't own {service}")
 
     @app.get("/metrics")
     def metrics():
@@ -302,6 +312,7 @@ def create_app(
         claims = verify(authorization)
         if errors := policy.waiver_errors(req.model_dump(), claims.get("cqp_role")):
             raise HTTPException(403, {"errors": errors})
+        check_waiver_owner(claims, req.service)
         now = clock()
         # The approver is whoever's token this is; a request can't name someone else.
         waiver = {
@@ -325,9 +336,14 @@ def create_app(
     def revoke(waiver_id: str, authorization: str = Header(...)):
         """Ends a waiver early. Approvers only."""
         # The same people who can create a waiver can end one.
-        if verify(authorization).get("cqp_role") not in APPROVER_ROLES:
+        claims = verify(authorization)
+        if claims.get("cqp_role") not in APPROVER_ROLES:
             raise HTTPException(403, "only approvers can revoke waivers")
         with connect() as conn, conn.transaction():
+            service = db.waiver_service(conn, waiver_id)
+            if service is None:
+                raise HTTPException(404, "no such active waiver")
+            check_waiver_owner(claims, service)
             # Revoked, not deleted: past decisions still point at it.
             if not db.revoke_waiver(conn, waiver_id, clock()):
                 raise HTTPException(404, "no such active waiver")

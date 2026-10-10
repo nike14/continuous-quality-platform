@@ -41,7 +41,34 @@ def test_effect_depends_on_stage(policy):
 
 
 def test_check_not_judged_at_a_stage_gives_no_finding(policy):
-    assert run(policy, "prod-deploy", UNIT_FAIL) == []
+    assert run(policy, "integration", UNIT_FAIL) == []
+
+
+def test_failing_unit_tests_block_a_prod_deploy(policy):
+    # The image's own evidence decides; a BLOCKED build can't be deployed around.
+    [f] = run(policy, "prod-deploy", UNIT_FAIL)
+    assert f["rule"] == "baseline.tests.unit" and f["effect"] == "block"
+
+
+# Measurements are judged by thresholds, and provenance never fails, so neither needs a cell.
+NOT_JUDGED_BY_STATUS = {"perf.load", "build.provenance"}
+
+
+def test_failing_prod_evidence_is_never_better_than_missing(policy):
+    # Otherwise a check that ran and failed would let a deploy through that no result would stop.
+    on_fail = policy._query("on_fail", {})
+    rank = {"warn": 1, "validate": 2, "block": 3}
+    for tier, checks in policy.expectations["prod-deploy"].items():
+        for check, e in checks.items():
+            if check in NOT_JUDGED_BY_STATUS:
+                continue
+            fail = on_fail.get(check, {}).get("prod-deploy")
+            assert fail and rank[fail] >= rank[e["on_missing"]], (tier, check)
+
+
+def test_teams_cannot_loosen_prod_deploy_test_cells(policy):
+    errors = policy.team_errors({"on_fail": {"tests.unit": {"prod-deploy": "warn"}}})
+    assert errors and "can't be looser" in errors[0]
 
 
 def test_missing_evidence_uses_its_on_missing_effect(policy):
@@ -215,7 +242,8 @@ def test_waiver_requests_are_checked(policy, rule, role, days, error):
 
 
 def test_a_valid_waiver_request_has_no_errors(policy):
-    assert policy.waiver_errors({"rule": "baseline.scan.sca", "days": 14}, "security") == []
+    waiver = {"rule": "baseline.scan.sca", "days": 14, "items": ["CVE-2026-1234"]}
+    assert policy.waiver_errors(waiver, "security") == []
 
 
 # ---- Kill switches and break-glass ----
