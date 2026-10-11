@@ -110,7 +110,7 @@ In order:
    so nobody can report results for someone else's commit.
 2. **Is the request valid?** `src/cqp/gather/event.py`, class `ReportMeta`: the check name must be
    known (`tests.unit`, `scan.sca`, …) and the format one we can parse (`junit`, `sarif`,
-   `cyclonedx`, `k6`, or `json` for build provenance only).
+   `cyclonedx`, `k6`, `schema-compat`, `squawk`, or `json` for build provenance only).
 3. **Does this repo own the service?** `catalog.owns()` in `src/cqp/catalog.py`. `payments-api`'s
    pipeline can't report a pass for `checkout-web`.
 4. **Size limit:** more than 50 MB is refused (413).
@@ -143,6 +143,8 @@ In order:
   | `sarif()` | static analysis | counts by level, fingerprints, `failing` (error-level) | any error |
   | `cyclonedx()` | vulnerability scan | counts by severity, CVE IDs, `failing` (critical/high) | any critical or high |
   | `k6()` | load test | p95 latency in ms | never on its own; teams set limits |
+  | `schema_compat()` | schema-registry answers, one `<subject>.json` each | subjects checked, `failing` (incompatible subjects), the registry's messages | any subject incompatible |
+  | `squawk()` | Postgres migration lint (`squawk --reporter json`) | `failing` (destructive steps), `locking` (long-lock steps) | any destructive step; long locks raise `baseline.db.locking` (validate) |
 
   Percentages are never stored: "96% passed" stays as counts and names, so rules can see
   **which** tests failed.
@@ -322,6 +324,8 @@ payload  small details: failing test names, CVE IDs, p95 latency…
 | Static analysis, linters, code security | **SARIF** (JSON) | `sarif()` | `findings`: counts by level plus fingerprints |
 | Dependency and container vulnerability scans | **CycloneDX** (JSON) | `cyclonedx()` | `findings`: counts by severity plus CVE IDs |
 | Load / performance tests | **k6 summary** (JSON) | `k6()` | `measurement`: p95 latency in ms |
+| Event schemas (Avro, Protobuf) | the **schema registry's compatibility answer** per subject | `schema_compat()` | `outcome`: incompatible subjects (`contract.schema`) |
+| Database migrations (Postgres) | **squawk** JSON | `squawk()` | `findings`: destructive and long-lock steps (`db.migration`) |
 | Build | small JSON with the image digest | handled inside `normalize()` | `outcome`: links image to commit |
 | Pact Broker, Argo Rollouts, monitoring, incident tools | their own webhook JSON | an adapter in `src/cqp/gather/adapters.py` | `outcome` / `health` |
 

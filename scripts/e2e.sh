@@ -45,6 +45,22 @@ stored() {  # service check run: wait until that result is in Postgres
 }
 wait_api() { for _ in $(seq 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/kill-switches")" == "200" ] && return; sleep 1; done; }
 
+# However the run ends (a failed check, Ctrl-C, a killed session), leave the stack as it was:
+# every service running and no rule switched off or waiver left behind for the next run.
+cleanup_kills=(); cleanup_waivers=()
+cleanup() {
+  compose start kafka decision-api >/dev/null 2>&1; wait_api
+  local k w
+  for k in "${cleanup_kills[@]+"${cleanup_kills[@]}"}"; do
+    curl -s -o /dev/null -X DELETE "$CQP_URL/v1/kill-switches/$k" -H "Authorization: Bearer $(token x platform)"
+  done
+  for w in "${cleanup_waivers[@]+"${cleanup_waivers[@]}"}"; do
+    curl -s -o /dev/null -X DELETE "$CQP_URL/v1/waivers/$w" -H "Authorization: Bearer $(token x security)"
+  done
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM   # so a stopped run still cleans up
+
 echo "== gather → store → decide"
 
 workspace; export CQP_TOKEN="$(token "$(newsha)")"
@@ -178,34 +194,37 @@ unset SERVICE
 echo "== team policies and waivers"
 
 policy_file() { printf '%s' "$1" > policy.yaml; echo "$PWD/policy.yaml"; }
-workspace; sha="$(newsha)"; export CQP_TOKEN="$(token "$sha")"
-check "another repo can't publish payments-api's policy" 403 "$(curl -s -o /dev/null -w '%{http_code}' \
-  -X PUT "$CQP_URL/v1/team-policies/payments-api" -H "Authorization: Bearer $(token "$sha" "" checkout/checkout-web)" \
+# A throwaway service (owned by platform/e2e in catalog.yaml), so a run cut short never leaves a
+# team policy or waiver on a real one.
+workspace; sha="$(newsha)"; export SERVICE="e2e-svc-team-$RANDOM" CQP_TOKEN="$(token "$sha" "" platform/e2e)"
+check "another repo can't publish this service's policy" 403 "$(curl -s -o /dev/null -w '%{http_code}' \
+  -X PUT "$CQP_URL/v1/team-policies/$SERVICE" -H "Authorization: Bearer $(token "$sha" "" checkout/checkout-web)" \
   -H 'Content-Type: application/json' -d '{}')"
 check "a policy looser than the baseline fails its MR check" 1 \
-  "$(cqp policy check --service payments-api --file "$(policy_file 'on_fail: {scan.sca: {build: warn}}')" 2>/dev/null; echo $?)"
+  "$(cqp policy check --service "$SERVICE" --file "$(policy_file 'on_fail: {scan.sca: {build: warn}}')" 2>/dev/null; echo $?)"
 check "a valid team policy is published" 0 \
-  "$(cqp policy publish --service payments-api --file "$(policy_file 'thresholds: {perf.load: {max: 100, effect: block}}')" >/dev/null; echo $?)"
+  "$(cqp policy publish --service "$SERVICE" --file "$(policy_file 'thresholds: {perf.load: {max: 100, effect: block}}')" >/dev/null; echo $?)"
 upload tests.integration junit "$JUNIT_PASS" integration.xml
 upload perf.load k6 "$K6" k6.json
 check "the team's p95 limit blocks integration" 1 "$(gate --stage integration)"
-check "a developer can't create a waiver" 1 "$(cqp waiver --service payments-api --rule team.perf.load.threshold \
+check "a developer can't create a waiver" 1 "$(cqp waiver --service "$SERVICE" --rule team.perf.load.threshold \
   --reason e2e --ticket E2E-1 --days 1 >/dev/null 2>&1; echo $?)"
-waiver_id="$(CQP_TOKEN="$(token "$sha" approver)" cqp waiver --service payments-api --rule team.perf.load.threshold \
+approver="$(token "$sha" approver platform/e2e)"
+waiver_id="$(CQP_TOKEN="$approver" cqp waiver --service "$SERVICE" --rule team.perf.load.threshold \
   --reason e2e --ticket E2E-1 --days 1 | python3 -c "import json,sys; print(json.load(sys.stdin)['waiver_id'])")"
+cleanup_waivers+=("$waiver_id")
 check "with an approver's waiver it only warns" 0 "$(gate --stage integration)"
 check "the warning names the waiver ticket" 1 "$(grep -c 'E2E-1' gate.log)"
 check "the waiver can be revoked" 204 "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-  "$CQP_URL/v1/waivers/$waiver_id" -H "Authorization: Bearer $(token "$sha" approver)")"
-check "a validate limit needs a person (exit 2)" 2 "$(cqp policy publish --service payments-api \
+  "$CQP_URL/v1/waivers/$waiver_id" -H "Authorization: Bearer $approver")"
+check "a validate limit needs a person (exit 2)" 2 "$(cqp policy publish --service "$SERVICE" \
   --file "$(policy_file 'thresholds: {perf.load: {max: 100, effect: validate}}')" >/dev/null; gate --stage integration)"
 id="$(grep -o 'decision [0-9a-f]*' gate.log | head -1 | cut -d' ' -f2)"
 check "a developer can't approve" 1 "$(cqp approve --decision "$id" --reason e2e >/dev/null 2>&1; echo $?)"
-check "an approver can" 0 "$(CQP_TOKEN="$(token "$sha" approver)" cqp approve --decision "$id" \
+check "an approver can" 0 "$(CQP_TOKEN="$approver" cqp approve --decision "$id" \
   --reason "e2e: known spike" >/dev/null; echo $?)"
 check "the re-run gate proceeds, naming the approver" "0 1" "$(gate --stage integration) $(grep -c 'approved by approver' gate.log)"
-# Clean up: an empty policy makes payments-api follow the baseline again.
-cqp policy publish --service payments-api --file "$(policy_file '{}')" >/dev/null
+unset SERVICE
 
 echo "== kill switches, break-glass and the portal"
 
@@ -227,6 +246,7 @@ check "the gate log says it was break-glass" 1 "$(grep -c 'break-glass by' gate.
 blocked_pr
 kill_id="$(CQP_TOKEN="$(token "$sha" platform)" cqp kill-switch --rule baseline.tests.unit \
   --reason "e2e: bad rule release" --hours 1 | python3 -c "import json,sys; print(json.load(sys.stdin)['kill_id'])")"
+cleanup_kills+=("$kill_id")   # it switches a rule off for every service
 check "with the rule switched off, the PR only warns" 0 "$(gate --stage pr)"
 check "the rule can be switched back on" 204 "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
   "$CQP_URL/v1/kill-switches/$kill_id" -H "Authorization: Bearer $(token "$sha" platform)")"

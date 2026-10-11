@@ -16,8 +16,8 @@ files = junit.xml            (one or more files; repeat the "files" part)
 | Field | Values | Comes from |
 | --- | --- | --- |
 | `service` | A service in `policy/catalog.yaml` owned by the token's repo | `--service`, default `CI_PROJECT_NAME` |
-| `check` | `tests.unit`, `tests.component`, `tests.integration`, `tests.api`, `tests.contract`, `tests.e2e`, `scan.sca`, `scan.container`, `scan.secrets`, `static.quality`, `perf.load`, `build.provenance` | `CQP_CHECK` |
-| `format` | `junit`, `sarif`, `cyclonedx`, `k6`, or `json` (only for `build.provenance`) | `CQP_FORMAT` |
+| `check` | `tests.unit`, `tests.component`, `tests.integration`, `tests.api`, `tests.contract`, `tests.e2e`, `contract.schema`, `db.migration`, `scan.sca`, `scan.container`, `scan.secrets`, `static.quality`, `perf.load`, `build.provenance` | `CQP_CHECK` |
+| `format` | `junit`, `sarif`, `cyclonedx`, `k6`, `schema-compat` (schema-registry answers, one `<subject>.json` each), `squawk` (migration lint), or `json` (only for `build.provenance`) | `CQP_FORMAT` |
 | `image` | Image digest, or `null` before the build | `.cqp/image-digest` |
 | `files` | The tool's own output | `CQP_FILES` glob |
 

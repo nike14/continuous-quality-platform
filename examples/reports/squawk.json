@@ -1,0 +1,26 @@
+[
+  {
+    "file": "migrations/0042_orders.sql",
+    "line": 3,
+    "column": 0,
+    "level": "Warning",
+    "messages": [{"Note": "Dropping a column may break existing clients."}],
+    "rule_name": "ban-drop-column"
+  },
+  {
+    "file": "migrations/0042_orders.sql",
+    "line": 7,
+    "column": 0,
+    "level": "Warning",
+    "messages": [{"Help": "Create the index CONCURRENTLY."}],
+    "rule_name": "require-concurrent-index-creation"
+  },
+  {
+    "file": "migrations/0042_orders.sql",
+    "line": 9,
+    "column": 0,
+    "level": "Warning",
+    "messages": [{"Help": "Use a text field instead."}],
+    "rule_name": "prefer-text-field"
+  }
+]

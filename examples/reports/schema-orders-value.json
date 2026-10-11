@@ -1,0 +1,6 @@
+{
+  "is_compatible": false,
+  "messages": [
+    "READER_FIELD_MISSING_DEFAULT_VALUE, location:/fields/2, field 'currency' has no default value"
+  ]
+}
