@@ -43,7 +43,7 @@ upload tests.unit junit "$JUNIT_PASS" junit.xml
 upload scan.secrets sarif "$SARIF_CLEAN" secrets.sarif
 gate pr
 
-echo "-- PR: blocked by a failing unit test, then a rerun that passes"
+echo "-- PR: blocked by a failing unit test, then a rerun that passes (flagged as likely flaky)"
 change payments-api
 upload tests.unit junit "$JUNIT_FAIL" junit.xml
 upload scan.secrets sarif "$SARIF_CLEAN" secrets.sarif
@@ -146,6 +146,11 @@ export CQP_TOKEN="$(token "$SHA" "" checkout/checkout-web)"
 upload tests.integration junit "$JUNIT_PASS" integration.xml
 upload perf.load k6 "$K6" k6.json
 upload tests.e2e junit "$JUNIT_PASS" e2e.xml
+decision="$(gate integration | tee /dev/stderr | grep -o 'decision [0-9a-f]*' | cut -d' ' -f2)"
+
+echo "-- Approval: checkout-web's lead (not the author) accepts the slow load test for this change"
+CQP_TOKEN="$(token x approver checkout/checkout-web)" cqp approve --decision "$decision" \
+  --reason "p95 spike is the cold cache after the schema change" --ticket CHK-51
 gate integration
 
 echo "-- Waivers: security accepts ledger-service's critical CVE for a week, so the build only warns"
@@ -193,4 +198,5 @@ docker compose -f "$root/docker-compose.yml" exec -T postgres psql -U cqp -c "
   UNION ALL SELECT 'team_policies', count(*) FROM team_policies
   UNION ALL SELECT 'waivers', count(*) FROM waivers
   UNION ALL SELECT 'kill_switches', count(*) FROM kill_switches
-  UNION ALL SELECT 'break_glass', count(*) FROM break_glass;"
+  UNION ALL SELECT 'break_glass', count(*) FROM break_glass
+  UNION ALL SELECT 'approvals', count(*) FROM approvals;"

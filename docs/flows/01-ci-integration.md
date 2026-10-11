@@ -19,7 +19,7 @@ the CLI builds each request from **environment variables that GitLab sets in eve
 
 Set once per group: GitLab → the group → **Settings → CI/CD → Variables** → `CQP_URL` =
 `https://cqp.company.com`. Every project in the group inherits it. Locally it is
-`http://localhost:8080` (`scripts/demo.sh` exports it; Postman calls it `{{cqp_url}}`).
+`http://localhost:8080` (`scripts/demo.sh` exports it).
 
 The CLI reads it with the token (`src/cqp/gather/cli.py:121`) and adds the path for each command:
 
@@ -64,7 +64,7 @@ private key, and CQP checks it against GitLab's public keys (`CQP_JWKS_URL`), so
 report is (service, check, format); the token says *who* sent it and *for which commit*. That's
 why a job can't report a pass for another repo's service or another commit.
 
-Locally, `scripts/dev_token.py` and Postman play GitLab's part: they sign the same claims with the
+Locally, `scripts/dev_token.py` plays GitLab's part: it signs the same claims with the
 dev key in `dev/private/key.pem`, and `dev-idp` serves the matching public key.
 
 ## One job, start to finish
@@ -135,8 +135,6 @@ CQP doesn't work it out. The gate reads `CI_MERGE_REQUEST_IID` and sends it as `
   comment, only a commit status.
 - **It's safe for the caller to send.** The project comes from the token, so a pipeline can only
   comment on MRs in its own project.
-
----
 
 ---
 

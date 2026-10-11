@@ -85,17 +85,44 @@ def test_polls_while_pending_then_uses_final_answer():
     assert run(client) == 1 and len(calls) == 2
 
 
-def test_gives_up_after_max_wait_and_asks_for_validation():
+def test_gives_up_after_max_wait_with_its_own_exit_code(capsys):
+    # Still waiting isn't "a person must approve": 3, not 2, and the log says it will resume.
     client, _ = cqp_answering(
         decision("pending", "REQUIRE_VALIDATION", waiting=[{"check": "perf.load"}])
     )
-    assert run(client, max_wait=30) == 2
+    assert run(client, max_wait=30) == 3
+    assert "re-runs this job" in capsys.readouterr().err
+
+
+def test_a_final_answer_that_isnt_proceed_points_at_explain(capsys):
+    client, _ = cqp_answering(decision(outcome="REQUIRE_VALIDATION"))
+    assert run(client) == 2
+    assert "cqp explain d-1" in capsys.readouterr().err
 
 
 def test_unreachable_cqp_continues_before_production_but_not_in_it():
     client, _ = cqp_answering("down")
     assert run(client, "pr") == 0
     assert run(client, "prod-deploy") == 2
+
+
+def test_unreachable_cqp_still_stops_on_this_pipelines_own_known_failures(capsys):
+    # cqp report recorded these. A failed unit test run is known-bad, CQP or not.
+    Path(".cqp/results").mkdir()
+    Path(".cqp/results/101-tests.unit.json").write_text('{"check": "tests.unit", "status": "fail"}')
+    Path(".cqp/results/102-tests.e2e.json").write_text('{"check": "tests.e2e", "status": "fail"}')
+    client, _ = cqp_answering("down")
+    assert run(client, "pr") == 1
+    assert "tests.unit failed" in capsys.readouterr().err
+
+
+def test_unreachable_cqp_ignores_failures_the_baseline_doesnt_always_block():
+    # A failing e2e run only warns at some stages, so without CQP it doesn't stop anything.
+    Path(".cqp/results").mkdir()
+    Path(".cqp/results/102-tests.e2e.json").write_text('{"check": "tests.e2e", "status": "fail"}')
+    Path(".cqp/results/103-tests.unit.json").write_text("{not json")
+    client, _ = cqp_answering("down")
+    assert run(client, "pr") == 0
 
 
 def test_a_refused_request_fails_the_job_instead_of_falling_back(capsys):

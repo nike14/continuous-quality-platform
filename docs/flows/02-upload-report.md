@@ -51,8 +51,6 @@ run separately, so they need shared storage like S3.
 Why keep the original file at all, and why not in Kafka or Postgres: see *Raw report files (object
 storage)* in [WALKTHROUGH.md](../WALKTHROUGH.md#raw-report-files-object-storage).
 
-**Test it in Postman** ([setup](13-postman-testing.md)): every folder starts with uploads; folder *99 · Refused requests* shows the 401, 403 and 422 cases.
-
 ---
 
 [← 1. How a CI job calls CQP](01-ci-integration.md) · [3. PR gate: blocked, then fixed →](03-pr-gate.md)

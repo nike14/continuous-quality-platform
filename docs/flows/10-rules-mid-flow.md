@@ -152,7 +152,7 @@ changed is recorded in each decision's `input`.
 
 ### Try it yourself
 
-In Postman: folder *10 · Rules changed mid-flow* runs these exact steps, with a check on each ([setup](13-postman-testing.md)). Or from a terminal:
+From a terminal:
 
 ```bash
 U=http://localhost:8080

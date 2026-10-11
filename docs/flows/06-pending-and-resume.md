@@ -18,12 +18,16 @@ passed, or the caller's own uploads aren't stored yet, the answer is:
 
 1. `cqp gate` asks again every 5 seconds, up to `--max-wait` (120s by default). Each repeat from the
    same job, waiting on the same things, gets the same decision back.
-2. If still pending, the gate exits 2 and the runner is freed.
+2. If still pending, the gate exits **3** (not 2: nobody needs to approve anything) and the runner
+   is freed. The job shows as failed for now; the MR comment and the `cqp/<stage>` commit status
+   (pending) say the job re-runs by itself.
 3. The notifier remembers the gate job. Every 10 seconds it checks the stored evidence; when the
    checks arrive or the deadline passes, it calls GitLab's
    `POST /projects/:id/jobs/:job_id/retry`. The re-run gate job gets the final decision.
 
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *06 · Pending decision*. Watch `docker compose logs -f notifier` for the retry.
+The 60-second wait for the caller's own uploads counts from that gate job's first request. A
+pipeline retried an hour later is a new job with new uploads, so it gets its own minute instead of
+being decided on the old results.
 
 ---
 

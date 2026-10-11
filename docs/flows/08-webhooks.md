@@ -25,8 +25,6 @@ wrong shape `422`.
 Any body may also carry `observed_at` (ISO 8601 with a timezone), so a late delivery can't
 overwrite newer state. **Response:** `202 {"event_ids": ["…"]}`.
 
-**Test it in Postman** ([setup](13-postman-testing.md)): folders *07 · Production deploy* and *08 · Webhook from a tool outside CI*.
-
 ---
 
 [← 7. Production deploy](07-production-deploy.md) · [9. Kill switch →](09-kill-switch.md)

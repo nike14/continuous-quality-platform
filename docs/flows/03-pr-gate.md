@@ -52,8 +52,6 @@
 
 `GET /v1/decisions/{decision_id}` returns a stored decision with its full `input`: the audit trail.
 
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *03 · PR gate*.
-
 ---
 
 [← 2. Upload a report](02-upload-report.md) · [4. Build gate: waiver and break-glass →](04-build-gate.md)

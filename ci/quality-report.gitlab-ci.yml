@@ -14,7 +14,12 @@
 
 # Golden-path gate. Extend it once per stage and set CQP_STAGE (pr, build, integration).
 # prod-deploy is asked by the deploy system's own pipeline (policy/trust.yaml), not the service's.
-# Exit codes: 0 proceed (or warn), 1 blocked, 2 needs validation (approval or more evidence).
+# Exit codes: 0 proceed (or warn), 1 blocked, 2 needs a person (cqp approve), 3 still waiting
+# for evidence. On 3 the job fails for now, and CQP's notifier retries it when the evidence lands
+# or the deadline passes; the MR comment and the cqp/<stage> status (pending) say so.
+# If CQP is down: the gate stops on this pipeline's own failed unit, component or integration
+# tests or secrets scan (cqp report recorded them in .cqp/results); otherwise it carries on with
+# a warning, and asks for approval at prod-deploy.
 .quality-gate:
   id_tokens:
     CQP_TOKEN:

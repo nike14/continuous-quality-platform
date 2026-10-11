@@ -41,8 +41,6 @@
    stage. The gate job must be **re-run by hand**; it then answers `PROCEED_WITH_WARNING`, with every
    finding turned into a warning and a `baseline.break_glass` finding added.
 
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *04 · Build gate*.
-
 ---
 
 [← 3. PR gate: blocked, then fixed](03-pr-gate.md) · [5. Team policy →](05-team-policy.md)

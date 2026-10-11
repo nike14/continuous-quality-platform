@@ -35,6 +35,8 @@ TOKENS = {
     "branch-token": {**CLAIMS, "ref_protected": "false"},
     "other-repo-token": {**CLAIMS, "project_path": "checkout/checkout-web"},
     "approver-token": {**CLAIMS, "cqp_role": "approver", "user_login": "lead"},
+    # An approver who is also the developer who started the job: can't approve their own change.
+    "dev-approver-token": {**CLAIMS, "cqp_role": "approver"},
     "other-approver-token": {
         **CLAIMS,
         "project_path": "checkout/checkout-web",
@@ -130,7 +132,7 @@ def conn(pg_url):
         notify_db.migrate(c)
         c.execute(
             "TRUNCATE signals, builds, decisions, waiting_pipelines, team_policies, waivers, "
-            "kill_switches, break_glass, policy_versions"
+            "kill_switches, break_glass, approvals, policy_versions"
         )
         c.commit()
         yield c

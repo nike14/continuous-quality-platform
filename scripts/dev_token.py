@@ -52,7 +52,8 @@ def main() -> None:
         "pipeline_id": 1,
         "job_id": 1000 + secrets.randbelow(99000),
         "ref_protected": "true",
-        "user_login": "dev",
+        # A person with a role is someone else than the developer, as approvals need four eyes.
+        "user_login": role or "dev",
     }
     if role:
         claims["cqp_role"] = role

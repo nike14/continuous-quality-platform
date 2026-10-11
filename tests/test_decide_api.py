@@ -67,7 +67,13 @@ def test_failing_unit_tests_block_and_the_decision_can_be_replayed(setup, conn):
 
     assert d["status"] == "final" and d["outcome"] == "BLOCKED"
     assert "PaymentRefundTest.partial" in d["findings"][0]["message"]
-    assert api.get(f"/v1/decisions/{d['decision_id']}").json()["outcome"] == "BLOCKED"
+    path = f"/v1/decisions/{d['decision_id']}"
+    assert (
+        api.get(path, headers={"Authorization": "Bearer good-token"}).json()["outcome"] == "BLOCKED"
+    )
+    # The record carries the full evidence, so it needs a token.
+    assert api.get(path).status_code == 401
+    assert api.get(path, headers={"Authorization": "Bearer forged"}).status_code == 401
     # Same input, same rules: a replay must give the same outcome.
     assert replay(connect, policy, d["decision_id"])
 

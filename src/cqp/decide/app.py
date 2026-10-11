@@ -11,6 +11,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
+import httpx
 import jwt
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -21,7 +22,9 @@ from cqp.decide import db, portal
 from cqp.decide.engine import completeness, outcome
 from cqp.decide.policy import Policy
 from cqp.decide.team import TeamPolicy
+from cqp.gather.event import Check
 from cqp.metrics import (
+    APPROVALS,
     BREAK_GLASS,
     DECISION_ERRORS,
     DECISION_SECONDS,
@@ -31,12 +34,14 @@ from cqp.metrics import (
     PUBLISH_FAILURES,
     metrics_response,
 )
+from cqp.store import db as store_db
 from cqp.store.db import latest
 
 # How long a caller's own uploads may still be in flight before we decide without them.
 IN_FLIGHT_GRACE = timedelta(seconds=60)
 DECISIONS_TOPIC = "cqp.decisions"
 BACKTEST_DECISIONS = 40  # enough history to be telling, quick enough for an MR check
+FLAKY_DAYS = 14  # long enough to see a pattern, short enough that fixed tests drop off
 APPROVER_ROLES = {"approver", "security"}
 log = logging.getLogger(__name__)
 
@@ -82,6 +87,36 @@ class BreakGlassRequest(BaseModel):
     ticket: str = Field(min_length=1)  # the incident or change ticket the review hangs off
 
 
+class ApprovalRequest(BaseModel):
+    """A person accepting the findings that needed validation in one decision."""
+
+    reason: str = Field(min_length=1)
+    ticket: str | None = Field(default=None, min_length=1)
+
+
+class LocalSignal(BaseModel):
+    """One check's result as `cqp preview` read it from a local report."""
+
+    kind: str
+    status: Literal["pass", "fail"]
+    payload: dict = {}
+
+
+class PreviewRequest(BaseModel):
+    """What `cqp preview` sends: local results, judged under the real rules, recorded nowhere."""
+
+    service: str
+    stage: Literal["pr", "build", "integration"]  # production is never previewed
+    evidence: dict[Check, LocalSignal]
+
+
+class BaselineBacktestRequest(BaseModel):
+    """A candidate baseline.rego, to run on recent decisions before it is released."""
+
+    rego: str = Field(min_length=1)
+    limit: int = Field(default=200, ge=1, le=1000)
+
+
 def create_app(
     connect: Callable,
     policy: Policy,
@@ -102,7 +137,7 @@ def create_app(
         except jwt.PyJWTError as e:
             raise HTTPException(401, "invalid token") from e
 
-    def check_waiver_owner(claims: dict, service: str) -> None:
+    def check_owner(claims: dict, service: str) -> None:
         """An approver acts for the services their repo owns; security for every service."""
         if claims.get("cqp_role") == "security":
             return
@@ -150,11 +185,15 @@ def create_app(
             raise HTTPException(422, "the token has no commit (sha) and no image was given")
         tier = policy.tier(req.service)
         now = clock()
+        job_id = str(claims["job_id"]) if claims.get("job_id") is not None else None
 
         # One transaction: the decision is recorded against exactly the evidence we read.
         with connect() as conn, conn.transaction():
             first = db.first_asked(conn, req.service, subject, req.stage) or now
-            evidence = latest(conn, req.service, req.image, commit=commit)
+            # In production an untrusted result about the image can only make things stricter.
+            evidence = latest(
+                conn, req.service, req.image, commit=commit, trusted_only=req.stage == "prod-deploy"
+            )
             # A result past its max age (a scan from last month) doesn't count; it's missing.
             stale = {
                 check
@@ -164,8 +203,16 @@ def create_app(
             }
             evidence = {c: e for c, e in evidence.items() if c not in stale}
             # The caller's own uploads may still be on their way through Kafka. Wait for them
-            # for the first minute only; after that a lost upload is missing, not a reason to wait.
-            in_flight = [] if now - first > IN_FLIGHT_GRACE else db.not_stored(conn, req.event_ids)
+            # for this job's first minute only; after that a lost upload is missing, not a reason
+            # to wait. Per job: a retried pipeline an hour later has new uploads of its own.
+            job_first = (
+                db.first_asked(conn, req.service, subject, req.stage, job_id=job_id) or now
+                if job_id is not None
+                else first
+            )
+            in_flight = (
+                [] if now - job_first > IN_FLIGHT_GRACE else db.not_stored(conn, req.event_ids)
+            )
             team_version, team = db.team_policy(conn, req.service)
             # A team can wait for more checks, but the baseline's expectations always win.
             expected = {
@@ -194,6 +241,13 @@ def create_app(
                 "waivers": db.active_waivers(conn, req.service, now),
                 "kill_switches": kill_switches,
                 "break_glass": glass,
+                # Checks that passed only after failing on this same change (likely flaky).
+                "reruns": store_db.reruns(conn, req.service, req.image, commit, evidence),
+                # The protected branch's last result per check: new vs existing, regressions.
+                "baseline": store_db.baseline(
+                    conn, req.service, sorted(evidence), req.image, commit
+                ),
+                "approvals": db.active_approvals(conn, req.service, subject, req.stage, now),
             }
             if req.stage == "prod-deploy":
                 # Production state is part of the input, so a replay sees exactly what we saw.
@@ -206,7 +260,6 @@ def create_app(
             # so a gate that stops polling won't proceed.
             pending = bool(in_flight or waiting)
             all_waiting = waiting + [{"event_id": e} for e in in_flight]
-            job_id = str(claims["job_id"]) if claims.get("job_id") is not None else None
             if pending:
                 # The gate polls every few seconds. If this job is still waiting on exactly the
                 # same things, hand back the same decision: no new row, MR edit or status post.
@@ -235,6 +288,7 @@ def create_app(
                 "job_id": job_id,
                 # The outcome is the same in every mode; only what the gate does with it differs.
                 "mode": policy.catalog.mode(req.service),
+                "requested_by": claims.get("user_login"),
             }
             db.insert(conn, decision)
 
@@ -312,7 +366,7 @@ def create_app(
         claims = verify(authorization)
         if errors := policy.waiver_errors(req.model_dump(), claims.get("cqp_role")):
             raise HTTPException(403, {"errors": errors})
-        check_waiver_owner(claims, req.service)
+        check_owner(claims, req.service)
         now = clock()
         # The approver is whoever's token this is; a request can't name someone else.
         waiver = {
@@ -343,7 +397,7 @@ def create_app(
             service = db.waiver_service(conn, waiver_id)
             if service is None:
                 raise HTTPException(404, "no such active waiver")
-            check_waiver_owner(claims, service)
+            check_owner(claims, service)
             # Revoked, not deleted: past decisions still point at it.
             if not db.revoke_waiver(conn, waiver_id, clock()):
                 raise HTTPException(404, "no such active waiver")
@@ -421,17 +475,157 @@ def create_app(
         )
         return b
 
-    # Read-only and no token needed, like the GET endpoints; changes go through the checked ones.
+    @app.post("/v1/decisions/{decision_id}/approvals", status_code=201)
+    def approve(decision_id: str, req: ApprovalRequest, authorization: str = Header(...)):
+        """Accepts what needed validation in this decision. Re-run the gate job to pick it up."""
+        claims = verify(authorization)
+        if errors := policy.approval_errors(claims.get("cqp_role")):
+            raise HTTPException(403, {"errors": errors})
+        with connect() as conn, conn.transaction():
+            d = db.get(conn, decision_id)
+            if d is None:
+                raise HTTPException(404, "no such decision")
+            check_owner(claims, d["service"])
+            # Only what a person can actually look at: a block stays a block, and a pending
+            # decision is still waiting for evidence, not for a person.
+            if d["status"] != "final" or d["outcome"] != "REQUIRE_VALIDATION":
+                raise HTTPException(
+                    409,
+                    f"only a final REQUIRE_VALIDATION decision can be approved, not "
+                    f"{d['status']} {d['outcome']}",
+                )
+            # Four eyes: whoever started the job that asked can't wave their own change through.
+            if d.get("requested_by") and d["requested_by"] == claims.get("user_login"):
+                raise HTTPException(403, "you can't approve a decision you asked for")
+            a = {
+                "approval_id": uuid.uuid4().hex,
+                "decision_id": decision_id,
+                "service": d["service"],
+                "subject": d["subject"],
+                "stage": d["stage"],
+                # Exactly what they saw: a new or different finding needs a new look.
+                "findings": [
+                    {"rule": f["rule"], "message": f["message"]}
+                    for f in d["findings"]
+                    if f["effect"] == "validate"
+                ],
+                "reason": req.reason,
+                "ticket": req.ticket,
+                "approved_by": claims.get("user_login") or "unknown",
+                "created_at": clock(),
+            }
+            db.insert_approval(conn, a)
+        APPROVALS.labels(d["stage"]).inc()
+        log.info(
+            "approval on %s %s at %s by %s",
+            d["service"],
+            d["subject"],
+            d["stage"],
+            a["approved_by"],
+        )
+        return a
+
+    @app.post("/v1/preview")
+    def preview(req: PreviewRequest):
+        """What the gate would say about local results. Nothing is recorded or posted."""
+        now = clock()
+        with connect() as conn:
+            team_version, team = db.team_policy(conn, req.service)
+            evidence = {c: s.model_dump() for c, s in req.evidence.items()}
+            expected = {
+                **team.get("extra_checks", {}).get(req.stage, {}),
+                **policy.expected(req.stage, policy.tier(req.service)),
+            }
+            policy_input = {
+                "service": req.service,
+                "stage": req.stage,
+                "tier": policy.tier(req.service),
+                "evidence": evidence,
+                "missing": [],  # not run locally isn't missing: CI will run it
+                "team": team,
+                "team_policy_version": team_version,
+                "waivers": db.active_waivers(conn, req.service, now),
+                "kill_switches": db.active_kill_switches(conn, now),
+                "break_glass": None,
+                "reruns": {},
+                # No commit or image locally, so every protected-branch result is "another change".
+                "baseline": store_db.baseline(conn, req.service, sorted(evidence), None, None),
+                "approvals": [],
+            }
+        findings = policy.evaluate(policy_input)
+        return {
+            "outcome": outcome(findings),
+            "findings": findings,
+            "not_checked": sorted(c for c in expected if c not in evidence),
+            "policy_version": policy.version,
+            "team_policy_version": team_version,
+        }
+
+    @app.post("/v1/baseline/backtest")
+    def baseline_backtest(req: BaselineBacktestRequest, authorization: str = Header(...)):
+        """How recent decisions, across every service, would change under a candidate baseline."""
+        # The baseline affects everyone, so only the platform team, who releases it, may run it.
+        if verify(authorization).get("cqp_role") != "platform":
+            raise HTTPException(403, "only the platform team can backtest the baseline")
+        if "package cqp.baseline" not in req.rego:
+            raise HTTPException(422, "a baseline must be package cqp.baseline")
+        version = "cand" + hashlib.sha256(req.rego.encode()).hexdigest()[:12]
+        with connect() as conn:
+            recent = db.recent_final(conn, None, req.limit)
+        changed = []
+        try:
+            for d in recent:
+                would_be = outcome(policy.evaluate(d["input"], version=version, rego=req.rego))
+                if would_be != d["outcome"]:
+                    changed.append(
+                        {
+                            "decision_id": d["decision_id"],
+                            "service": d["service"],
+                            "stage": d["stage"],
+                            "was": d["outcome"],
+                            "would_be": would_be,
+                        }
+                    )
+        except httpx.HTTPStatusError as e:
+            # OPA refused to compile it: say why, rather than a 500.
+            raise HTTPException(422, f"OPA rejected the candidate: {e.response.text}") from e
+        return {
+            "candidate": version,
+            "current": policy.version,
+            "decisions": len(recent),
+            "changed": len(changed),
+            "examples": changed[:10],
+        }
+
+    @app.get("/v1/flaky")
+    def flaky(service: str, days: int = FLAKY_DAYS):
+        """Tests that failed and then passed on the same commit: candidates for quarantine."""
+        with connect() as conn:
+            return store_db.flaky(conn, service, clock() - timedelta(days=days))
+
+    # Read-only and no token needed; changes go through the checked endpoints. In production
+    # it sits behind company SSO. It shows outcomes only, not the evidence behind them.
     @app.get("/portal", response_class=HTMLResponse)
     def portal_page():
         with connect() as conn:
-            view = db.portal_view(conn, clock())
+            now = clock()
+            view = db.portal_view(conn, now)
+            view["flaky"] = [
+                {"service": name, **f}
+                for name in sorted(policy.catalog.services)
+                if "*" not in name
+                for f in store_db.flaky(conn, name, now - timedelta(days=FLAKY_DAYS))[:5]
+            ]
         return portal.render(view, policy.catalog.services)
 
     @app.get("/v1/decisions/{decision_id}")
-    def get_decision(decision_id: str):
-        """One stored decision, including the input it was made on."""
-        # The record includes the input it was decided on, so callers can see why.
+    def get_decision(decision_id: str, authorization: str | None = Header(None)):
+        """One stored decision, including the input it was made on. Needs a token."""
+        # The record carries the full evidence (CVE IDs, failing tests), so not for anonymous
+        # callers. Any valid CQP token will do: the MR comment already shows the findings.
+        if authorization is None:
+            raise HTTPException(401, "a token is needed to read a decision")
+        verify(authorization)
         with connect() as conn:
             d = db.get(conn, decision_id)
         if d is None:

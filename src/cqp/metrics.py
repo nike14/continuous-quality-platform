@@ -42,6 +42,9 @@ PUBLISH_FAILURES = Counter(
 BREAK_GLASS = Counter(
     "cqp_break_glass_total", "Emergency overrides; each one is reviewed", ["stage"]
 )
+APPROVALS = Counter(
+    "cqp_approvals_total", "Decisions a person approved after it needed validation", ["stage"]
+)
 KILL_SWITCHES = Gauge("cqp_kill_switches_active", "Rules the platform team has switched off")
 
 # Notify
@@ -56,6 +59,7 @@ for _result in ("stored", "dlq"):
     STORED.labels(_result)
 for _stage in ("pr", "build", "integration", "prod-deploy"):
     BREAK_GLASS.labels(_stage)
+    APPROVALS.labels(_stage)
 for _target in ("gitlab", "slack"):
     for _result in ("ok", "skipped", "error"):
         NOTIFICATIONS.labels(_target, _result)

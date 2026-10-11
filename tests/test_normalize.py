@@ -128,6 +128,18 @@ def test_build_provenance_records_the_image():
     assert s["payload"] == {"image": "sha256:ab12"}
 
 
+def test_trust_is_carried_and_an_old_ci_event_without_it_is_untrusted():
+    provenance = event("json", "build.provenance", image="sha256:ab12")
+    assert normalize({**provenance, "trusted": True}, None)["trusted"] is True
+    # Written before trust was recorded: a CI upload needs proof, a signed webhook doesn't.
+    assert normalize(provenance, None)["trusted"] is False
+    webhook = {
+        **event("pact", "tests.contract", payload={"status": "pass"}),
+        "producer": "adapter:x",
+    }
+    assert normalize(webhook, None)["trusted"] is True
+
+
 @pytest.mark.parametrize("fmt,data", [("junit", b"<not xml"), ("sarif", b"{}"), ("pact-ish", b"")])
 def test_unreadable_or_unknown_reports_are_bad_events(fmt, data):
     with pytest.raises(BadEventError):

@@ -68,6 +68,17 @@ def test_comment_explains_the_decision():
     body = render(decision())
     assert body.startswith("<!-- cqp -->")
     assert "Blocked" in body and "tests.unit failed: A.b" in body and "d-1" in body
+    assert "cqp explain d-1" in body
+
+
+def test_comment_says_what_happens_next():
+    # Pending: the job comes back by itself, so there's no reason to rerun anything.
+    pending = render(decision(status="pending", outcome="REQUIRE_VALIDATION", findings=[]))
+    assert "re-runs by itself" in pending and "cqp approve" not in pending
+    # Needs validation: who can approve, and how.
+    validate = render(decision(outcome="REQUIRE_VALIDATION"))
+    assert "cqp approve --decision d-1" in validate and "not the author" in validate
+    assert "cqp explain" not in render(decision(outcome="PROCEED", findings=[]))
 
 
 def test_blocked_pr_gets_a_comment_and_a_failed_status(conn):

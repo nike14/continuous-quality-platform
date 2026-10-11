@@ -2,6 +2,8 @@
 # Input: one decision's evidence, missing checks, team policy, waivers, kill switches,
 # break-glass and (for prod-deploy) production state. Output: `findings`, each with an effect.
 # The *_errors rules check team policy files and override requests before they're accepted.
+# Inputs added later (reruns, baseline, approvals) may be absent from older stored decisions;
+# every rule reading them simply doesn't fire then, so old decisions replay unchanged.
 package cqp.baseline
 
 import rego.v1
@@ -45,6 +47,20 @@ not_waivable := {"baseline.evidence_required", "baseline.change_freeze"}
 # critical CVE found while it is active still blocks.
 item_rules := {"baseline.scan.sca", "baseline.scan.secrets", "baseline.scan.container"}
 
+# A failure whose items were all already failing on the protected branch wasn't introduced by
+# this change. Before production it only warns, so nobody is blocked by debt they didn't add;
+# new items keep the stage's effect. prod-deploy judges the image as it is (debt there needs an
+# item waiver). Secrets are never relaxed: a leaked secret is urgent wherever it was found.
+relaxable := {"scan.sca", "scan.container", "static.quality"}
+
+# Tests a team may quarantine in its policy file (never contract tests or scans), and how many.
+quarantinable := {"tests.unit", "tests.component", "tests.api", "tests.integration", "tests.e2e"}
+
+max_quarantined := 10
+
+# A measurement this much worse than the protected branch's last one is worth telling the team.
+regression_warn_pct := 20
+
 # ---- Decisions: raw findings, then kill switches, waivers and break-glass ----
 
 # Every raw finding goes through the same steps: kill switch, else waiver, then break-glass on top.
@@ -66,14 +82,53 @@ findings contains f if {
 raw contains f if {
 	some check, e in input.evidence
 	e.status == "fail"
+	effect := effect_for(check) # undefined when the stage doesn't judge this check: no finding
+	# What made it fail (test names, CVE IDs, fingerprints), which a waiver can name.
+	failing := object.get(e.payload, "failing", [])
+	new := [i | some i in failing; not i in known_failing(check)]
 	f := {
 		"rule": sprintf("baseline.%s", [check]),
-		"effect": effect_for(check),
-		"message": sprintf("%s failed: %s", [check, detail(e)]),
-		# What made it fail (test names, CVE IDs, fingerprints), which a waiver can name.
-		"items": object.get(e.payload, "failing", []),
+		"effect": relaxed_effect(effect, failing, new),
+		"message": fail_message(check, e, failing, new),
+		"items": failing,
 	}
 }
+
+# What the protected branch's last result already had failing, where that may relax a finding.
+known_failing(check) := input.baseline[check].failing if {
+	check in relaxable
+	input.stage != "prod-deploy"
+} else := []
+
+relaxed_effect(effect, failing, new) := "warn" if {
+	count(failing) > 0
+	count(new) == 0
+} else := effect
+
+fail_message(check, e, failing, new) := msg if {
+	count(failing) > 0
+	count(new) == 0
+	msg := sprintf("%s: all %d failing already on the protected branch, not introduced by this change: %s", [check, count(failing), concat(", ", failing)])
+} else := msg if {
+	count(new) < count(failing)
+	msg := sprintf("%s failed: new in this change: %s (%d more already on the protected branch)", [check, concat(", ", new), count(failing) - count(new)])
+} else := sprintf("%s failed: %s", [check, detail(e)])
+
+# Passed only on a rerun of the same change: same code, different result, so likely flaky.
+# Shown, so a rerun that made a failure go away is never silent.
+raw contains f if {
+	some check, r in input.reruns
+	f := {
+		"rule": "baseline.passed_on_rerun",
+		"effect": "warn",
+		"message": sprintf("%s passed only on a rerun: %d earlier run(s) of this change failed%s; if it's flaky, quarantine it", [check, r.failed_runs, rerun_detail(r)]),
+		"items": r.items,
+	}
+}
+
+rerun_detail(r) := sprintf(" (%s)", [concat(", ", r.items)]) if {
+	count(r.items) > 0
+} else := ""
 
 raw contains f if {
 	some m in input.missing
@@ -98,6 +153,37 @@ raw contains f if {
 		"effect": t.effect,
 		"message": sprintf("%s is %v %s, over the team's limit of %v", [check, e.payload.value, e.payload.unit, t.max]),
 	}
+}
+
+# How much a measurement rose over the protected branch's last value, in whole percent.
+increase_pct(check) := round(((e.payload.value - b.value) * 100) / b.value) if {
+	e := input.evidence[check]
+	b := input.baseline[check]
+	is_number(e.payload.value)
+	is_number(b.value)
+	b.value > 0
+}
+
+team_limit(check) := input.team.thresholds[check].max_increase_pct
+
+# The organisation's default for "p95 up 20%": a warning, unless the team set its own limit.
+raw contains f if {
+	some check, e in input.evidence
+	pct := increase_pct(check)
+	not team_limit(check)
+	pct > regression_warn_pct
+	f := {"rule": "baseline.perf.regression", "effect": "warn",
+	      "message": sprintf("%s is %v %s, %v%% above the protected branch (%v %s)", [check, e.payload.value, e.payload.unit, pct, input.baseline[check].value, e.payload.unit])}
+}
+
+# A team's own limit on how much worse a measurement may get, with its own effect.
+raw contains f if {
+	some check, e in input.evidence
+	pct := increase_pct(check)
+	limit := team_limit(check)
+	pct > limit
+	f := {"rule": sprintf("team.%s.regression", [check]), "effect": input.team.thresholds[check].effect,
+	      "message": sprintf("%s is %v %s, %v%% above the protected branch (%v %s), over the team's limit of +%v%%", [check, e.payload.value, e.payload.unit, pct, input.baseline[check].value, e.payload.unit, limit])}
 }
 
 # Production state shapes the next production deploy. Only present for prod-deploy decisions.
@@ -169,7 +255,7 @@ step(f) := object.union(f, {
 	"message": sprintf("%s (rule switched off: %s)", [f.message, killed[f.rule]]),
 }) if f.rule in object.keys(killed)
 
-else := apply_waiver(f)
+else := approved(quarantined(apply_waiver(f)))
 
 killed[k.rule] := k.reason if some k in input.kill_switches
 
@@ -188,6 +274,34 @@ apply_waiver(f) := object.union(f, {
 	ws := [w | some w in input.waivers; w.rule == f.rule; covers(w, f)]
 	count(ws) > 0
 	w := ws[0] # several can match; quote the oldest (input is sorted by created_at)
+} else := f
+
+# A failing check whose failing tests are all in the team's quarantine only warns. The team
+# chose this in its reviewed policy file, under a ticket, and the finding stays visible.
+quarantined(f) := object.union(f, {
+	"effect": "warn",
+	"message": sprintf("%s (quarantined under %s)", [f.message, q.ticket]),
+}) if {
+	f.effect != "warn"
+	some check in quarantinable
+	f.rule == sprintf("baseline.%s", [check])
+	q := input.team.quarantine[check]
+	failing := object.get(f, "items", [])
+	count(failing) > 0
+	every i in failing { i in q.tests }
+} else := f
+
+# An approval accepts exactly the findings a person saw in a decision that needed validation:
+# the same rule with the same message. Anything new or different needs a new look.
+approved(f) := object.union(f, {
+	"effect": "warn",
+	"approval": a.id,
+	"message": sprintf("%s (approved by %s: %s)", [f.message, a.by, a.reason]),
+}) if {
+	f.effect == "validate"
+	matches := [a | some a in input.approvals; {"rule": f.rule, "message": f.message} in a.findings]
+	count(matches) > 0
+	a := matches[0] # several can match; quote the oldest (input is sorted by created_at)
 } else := f
 
 # A waiver without items accepts any finding of its rule.
@@ -210,6 +324,18 @@ team_policy_errors contains msg if {
 	msg := sprintf("%s at %s can't be looser than the organisation baseline (%s)", [check, stage, on_fail[check][stage]])
 }
 
+team_policy_errors contains msg if {
+	some check, _ in object.get(input.team, "quarantine", {})
+	not check in quarantinable
+	msg := sprintf("%s can't be quarantined: only tests can, and never contract tests", [check])
+}
+
+team_policy_errors contains msg if {
+	some check, q in object.get(input.team, "quarantine", {})
+	count(q.tests) > max_quarantined
+	msg := sprintf("%s quarantines %d tests; at most %d, so fix some first", [check, count(q.tests), max_quarantined])
+}
+
 # ---- Checking a waiver request ----
 
 waiver_errors contains "this rule can't be waived; use break-glass" if input.waiver.rule in not_waivable
@@ -228,7 +354,10 @@ waiver_errors contains "a scan waiver must name the items it accepts, e.g. a CVE
 	count(object.get(input.waiver, "items", [])) == 0
 }
 
-# ---- Checking a kill switch or break-glass request ----
+# ---- Checking an approval, kill switch or break-glass request ----
+
+approval_errors contains "only approvers can approve a decision" if not input.role in {"approver", "security"}
+
 
 kill_errors contains "only the platform team can switch off rules" if not input.role == "platform"
 

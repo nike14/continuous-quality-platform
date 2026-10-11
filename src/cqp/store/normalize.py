@@ -126,4 +126,6 @@ def normalize(event: dict, read_raw) -> dict:
         "raw_ref": event["raw_ref"],
         # Events written before observed_at existed only have received_at.
         "observed_at": event.get("observed_at") or event["received_at"],
+        # Events written before trust was recorded: a CI upload isn't trusted without proof.
+        "trusted": event.get("trusted", not event["producer"].startswith("ci:")),
     }

@@ -43,7 +43,7 @@ until_sql() {  # sql expected: poll up to 30s instead of sleeping a fixed time
 stored() {  # service check run: wait until that result is in Postgres
   until_sql "select count(*) from signals where service = '$1' and check_name = '$2' and run = '$3'" 1
 }
-wait_api() { for _ in $(seq 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/decisions/x")" == "404" ] && return; sleep 1; done; }
+wait_api() { for _ in $(seq 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/kill-switches")" == "200" ] && return; sleep 1; done; }
 
 echo "== gather → store → decide"
 
@@ -57,10 +57,14 @@ upload tests.unit junit "$JUNIT_FAIL" junit.xml
 upload scan.secrets sarif "$SARIF_CLEAN" secrets.sarif
 check "PR with a failing unit test is blocked" 1 "$(gate --stage pr)"
 check "the block names the failing test" 1 "$(grep -c 'PaymentRefundTest.partial' gate.log)"
+check "a local preview of the same report is blocked too (no token, nothing recorded)" 1 \
+  "$(CQP_TOKEN= cqp preview --report tests.unit:junit:reports/junit.xml >/dev/null 2>&1; echo $?)"
 blocked_id="$(grep -o 'decision [0-9a-f]*' gate.log | awk '{print $2}')"
 
 check "a decision can be looked up by ID" BLOCKED \
-  "$(curl -s "$CQP_URL/v1/decisions/$blocked_id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["outcome"])')"
+  "$(curl -s "$CQP_URL/v1/decisions/$blocked_id" -H "Authorization: Bearer $CQP_TOKEN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["outcome"])')"
+check "reading a decision needs a token (it carries the evidence)" 401 \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/decisions/$blocked_id")"
 check "a decision replays to the same outcome" True "$(compose exec -T decision-api python -c "
 from cqp.decide.server import pool, policy
 from cqp.decide.app import replay
@@ -115,7 +119,7 @@ workspace; sha="$(newsha)"; mkdir -p .cqp; echo "sha256:e2e-$sha" > .cqp/image-d
 export CQP_TOKEN="$(token "$sha")"
 upload tests.integration junit "$JUNIT_PASS" junit.xml
 gate_token="$(token "$sha")"
-check "integration waits for the 2-hour load test (exit 2)" 2 "$(CQP_TOKEN=$gate_token gate --stage integration --max-wait 6)"
+check "integration waits for the 2-hour load test (exit 3, pending)" 3 "$(CQP_TOKEN=$gate_token gate --stage integration --max-wait 6)"
 upload perf.load k6 "$K6" k6.json
 retried=0
 for _ in $(seq 30); do
@@ -123,6 +127,8 @@ for _ in $(seq 30); do
 done
 check "the notifier retries the waiting gate job once the result lands" 1 "$retried"
 check "the retried gate gets the final decision and proceeds" 0 "$(CQP_TOKEN=$gate_token gate --stage integration)"
+check "flaky test candidates are listed through the gateway" 200 \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$CQP_URL/v1/flaky?service=payments-api")"
 
 echo "== production quality"
 
@@ -191,6 +197,13 @@ check "with an approver's waiver it only warns" 0 "$(gate --stage integration)"
 check "the warning names the waiver ticket" 1 "$(grep -c 'E2E-1' gate.log)"
 check "the waiver can be revoked" 204 "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
   "$CQP_URL/v1/waivers/$waiver_id" -H "Authorization: Bearer $(token "$sha" approver)")"
+check "a validate limit needs a person (exit 2)" 2 "$(cqp policy publish --service payments-api \
+  --file "$(policy_file 'thresholds: {perf.load: {max: 100, effect: validate}}')" >/dev/null; gate --stage integration)"
+id="$(grep -o 'decision [0-9a-f]*' gate.log | head -1 | cut -d' ' -f2)"
+check "a developer can't approve" 1 "$(cqp approve --decision "$id" --reason e2e >/dev/null 2>&1; echo $?)"
+check "an approver can" 0 "$(CQP_TOKEN="$(token "$sha" approver)" cqp approve --decision "$id" \
+  --reason "e2e: known spike" >/dev/null; echo $?)"
+check "the re-run gate proceeds, naming the approver" "0 1" "$(gate --stage integration) $(grep -c 'approved by approver' gate.log)"
 # Clean up: an empty policy makes payments-api follow the baseline again.
 cqp policy publish --service payments-api --file "$(policy_file '{}')" >/dev/null
 
@@ -242,6 +255,8 @@ compose stop decision-api >/dev/null 2>&1
 workspace; export CQP_TOKEN="$(token "$(newsha)")"
 check "Decision API down: PR continues with a warning" 0 "$(gate --stage pr)"
 check "Decision API down: production asks for approval" 2 "$(gate --stage prod-deploy)"
+upload tests.unit junit "$JUNIT_FAIL" junit.xml
+check "Decision API down: this pipeline's own failing unit tests still stop it" 1 "$(gate --stage pr)"
 compose start decision-api >/dev/null 2>&1; wait_api
 
 compose stop kafka >/dev/null 2>&1

@@ -27,6 +27,8 @@ CREATE INDEX IF NOT EXISTS decisions_by_subject ON decisions (service, subject, 
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS job_id text;
 -- The service's adoption mode when it was decided: shadow, advisory or enforce.
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS mode text;
+-- Who started the job that asked, so they can't approve their own change.
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS requested_by text;
 
 -- Every baseline the Decision API has run with,
 -- so an old decision can be replayed on its own rules.
@@ -88,6 +90,22 @@ CREATE TABLE IF NOT EXISTS break_glass (
 );
 CREATE INDEX IF NOT EXISTS break_glass_by_subject
     ON break_glass (service, subject, stage, created_at);
+
+-- A person accepted the findings that needed validation in one decision. Covers exactly
+-- those findings (rule and message), for that change and stage, for a day.
+CREATE TABLE IF NOT EXISTS approvals (
+    approval_id text PRIMARY KEY,
+    decision_id text NOT NULL,
+    service     text NOT NULL,
+    subject     text NOT NULL,
+    stage       text NOT NULL,
+    findings    jsonb NOT NULL,
+    reason      text NOT NULL,
+    ticket      text,
+    approved_by text NOT NULL,
+    created_at  timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS approvals_by_subject ON approvals (service, subject, stage, created_at);
 """
 
 
@@ -97,12 +115,15 @@ def migrate(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
-def first_asked(conn, service: str, subject: str, stage: str):
-    """When this change was first asked about at this stage; deadlines count from here."""
+def first_asked(conn, service: str, subject: str, stage: str, job_id: str | None = None):
+    """When this change was first asked about at this stage; deadlines count from here.
+
+    With job_id: when that gate job first asked. A retried job is a new job, with its own uploads.
+    """
     return conn.execute(
         "SELECT min(created_at) FROM decisions WHERE service = %s AND subject = %s "
-        "AND stage = %s",
-        (service, subject, stage),
+        "AND stage = %s AND (%s::text IS NULL OR job_id = %s)",
+        (service, subject, stage, job_id, job_id),
     ).fetchone()[0]
 
 
@@ -120,8 +141,9 @@ def insert(conn, d: dict) -> None:
     # The full input is stored with it; that's what makes replay possible.
     conn.execute(
         """INSERT INTO decisions (decision_id, service, subject, stage, status, outcome, findings,
-                                  waiting, input, policy_version, created_at, job_id, mode)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                  waiting, input, policy_version, created_at, job_id, mode,
+                                  requested_by)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             d["decision_id"],
             d["service"],
@@ -136,6 +158,7 @@ def insert(conn, d: dict) -> None:
             d["created_at"],
             d.get("job_id"),
             d.get("mode", "enforce"),
+            d.get("requested_by"),
         ),
     )
 
@@ -297,14 +320,15 @@ def revoke_waiver(conn, waiver_id: str, now: datetime) -> bool:
     )
 
 
-def recent_final(conn, service: str, limit: int) -> list[dict]:
-    """The latest final decisions for a service, used to backtest a team policy change."""
+def recent_final(conn, service: str | None, limit: int) -> list[dict]:
+    """The latest final decisions for a service (or every service), used for backtests."""
     # Only final decisions: pending ones never ran the rules, so there's nothing to compare.
     with conn.cursor(row_factory=dict_row) as cur:
         return cur.execute(
-            """SELECT decision_id, stage, outcome, input FROM decisions
-               WHERE service = %s AND status = 'final' ORDER BY created_at DESC LIMIT %s""",
-            (service, limit),
+            """SELECT decision_id, service, stage, outcome, input FROM decisions
+               WHERE (%(service)s::text IS NULL OR service = %(service)s) AND status = 'final'
+               ORDER BY created_at DESC LIMIT %(limit)s""",
+            {"service": service, "limit": limit},
         ).fetchall()
 
 
@@ -376,6 +400,44 @@ def break_glass(conn, service: str, subject: str, stage: str, now: datetime) -> 
     return {"id": row[0], "reason": row[1], "ticket": row[2], "by": row[3]} if row else None
 
 
+APPROVAL_VALID = timedelta(hours=24)
+
+
+def insert_approval(conn, a: dict) -> None:
+    """Records an approval, so the next decision for that change accepts what it covers."""
+    conn.execute(
+        """INSERT INTO approvals (approval_id, decision_id, service, subject, stage, findings,
+                                  reason, ticket, approved_by, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (
+            a["approval_id"],
+            a["decision_id"],
+            a["service"],
+            a["subject"],
+            a["stage"],
+            Jsonb(a["findings"]),
+            a["reason"],
+            a["ticket"],
+            a["approved_by"],
+            a["created_at"],
+        ),
+    )
+
+
+def active_approvals(conn, service: str, subject: str, stage: str, now: datetime) -> list[dict]:
+    """Approvals for this change and stage from the last day, oldest first."""
+    rows = conn.execute(
+        """SELECT approval_id, findings, reason, ticket, approved_by FROM approvals
+           WHERE service = %s AND subject = %s AND stage = %s AND created_at > %s
+           ORDER BY created_at""",
+        (service, subject, stage, now - APPROVAL_VALID),
+    ).fetchall()
+    # Shaped for the policy input: the Rego reads findings, by and reason.
+    return [
+        {"id": r[0], "findings": r[1], "reason": r[2], "ticket": r[3], "by": r[4]} for r in rows
+    ]
+
+
 def expiring_waivers(conn, now: datetime, within: timedelta) -> list[dict]:
     """Active waivers that expire soon and haven't been reminded about yet."""
     # reminded_at IS NULL makes it one reminder per waiver.
@@ -417,6 +479,11 @@ def portal_view(conn, now: datetime) -> dict:
             "team_policies": q("""SELECT DISTINCT ON (service)
                                          service, version, published_by, published_at
                                   FROM team_policies ORDER BY service, published_at DESC"""),
+            "approvals": q(
+                """SELECT service, stage, subject, reason, ticket, approved_by, created_at
+                   FROM approvals WHERE created_at > %s ORDER BY created_at DESC""",
+                now - timedelta(days=7),
+            ),
             "decisions": q("""SELECT decision_id, service, stage, status, outcome, created_at
                               FROM decisions
                               ORDER BY created_at DESC LIMIT 20"""),

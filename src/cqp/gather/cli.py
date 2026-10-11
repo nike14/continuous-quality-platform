@@ -21,6 +21,25 @@ def warn(msg: str) -> int:
     return 0
 
 
+def record_locally(check: str, fmt: str, paths: list[str]) -> None:
+    """Keeps this report's pass/fail in .cqp/results, for the gate's fallback if CQP is down."""
+    from cqp.store.normalize import PARSERS
+
+    if fmt not in PARSERS:
+        return  # nothing to parse (build provenance)
+    try:
+        _, status, payload = PARSERS[fmt]([(Path(p).name, Path(p).read_bytes()) for p in paths])
+    # CQP is what judges the report; a file we can't read here just isn't recorded.
+    except (ValueError, KeyError, TypeError, IndexError, AttributeError, SyntaxError, OSError):
+        return
+    results = STATE / "results"
+    results.mkdir(parents=True, exist_ok=True)
+    name = f"{os.environ.get('CI_JOB_ID', 'local')}-{check}.json"
+    (results / name).write_text(
+        json.dumps({"check": check, "status": status, "failing": payload.get("failing", [])})
+    )
+
+
 def report(
     service: str,
     check: str,
@@ -35,6 +54,7 @@ def report(
     paths = sorted(glob.glob(pattern, recursive=True))
     if not paths:
         return warn(f"no files match {pattern!r}; nothing reported")
+    record_locally(check, fmt, paths)  # before uploading: it matters most when the upload fails
 
     image_file = STATE / "image-digest"  # written by the build job
     meta = {
@@ -116,17 +136,62 @@ def main(argv: list[str] | None = None) -> int:
     brk.add_argument("--decision", required=True, help="the decision ID from the gate's output")
     brk.add_argument("--reason", required=True)
     brk.add_argument("--ticket", required=True, help="the incident or change ticket")
+    apr = sub.add_parser(
+        "approve", help="accept what needed validation in one decision (approvers, not the author)"
+    )
+    apr.add_argument("--decision", required=True, help="the decision ID from the gate's output")
+    apr.add_argument("--reason", required=True)
+    apr.add_argument("--ticket")
+    exp = sub.add_parser("explain", help="a decision's findings and what you can do about each")
+    exp.add_argument("decision", help="the decision ID from the gate's output")
+    pre = sub.add_parser("preview", help="judge local reports under the real rules; nothing kept")
+    pre.add_argument("--service", default=os.environ.get("CI_PROJECT_NAME"))
+    pre.add_argument("--stage", default="pr", choices=["pr", "build", "integration"])
+    pre.add_argument(
+        "--report",
+        action="append",
+        dest="reports",
+        required=True,
+        metavar="CHECK:FORMAT:GLOB",
+        help="e.g. tests.unit:junit:'reports/**/*.xml' (repeatable)",
+    )
+    bas = sub.add_parser("baseline", help="platform team: try a baseline change before release")
+    bas.add_argument("action", choices=["backtest"])
+    bas.add_argument("--file", default="policy/baseline.rego")
     args = parser.parse_args(argv)
 
     url, token = os.environ.get("CQP_URL"), os.environ.get("CQP_TOKEN")
-    if args.command in ("policy", "waiver", "kill-switch", "break-glass"):
+    if args.command == "preview":
         from cqp.decide import team_cli
 
-        # kill-switch and break-glass aren't about one service, so they have no --service.
+        # No token: a preview records nothing, so it can run on a laptop before pushing.
+        if not (url and args.service):
+            print("cqp: CQP_URL or --service missing", file=sys.stderr)
+            return 1
+        with httpx.Client() as client:
+            return team_cli.preview(args.service, args.stage, args.reports, url, client)
+    people = ("policy", "waiver", "approve", "kill-switch", "break-glass", "explain", "baseline")
+    if args.command in people:
+        from cqp.decide import team_cli
+
+        # Only policy and waiver are about one named service; the rest have no --service.
         if not (url and token and getattr(args, "service", True)):
             print("cqp: CQP_URL, CQP_TOKEN or service missing", file=sys.stderr)
             return 1
         with httpx.Client() as client:
+            if args.command == "explain":
+                return team_cli.explain(args.decision, url, token, client)
+            if args.command == "baseline":
+                return team_cli.baseline_backtest(args.file, url, token, client)
+            if args.command == "approve":
+                return team_cli.create(
+                    f"/v1/decisions/{args.decision}/approvals",
+                    {"reason": args.reason, "ticket": args.ticket},
+                    ("approval_id", "stage", "findings"),
+                    url,
+                    token,
+                    client,
+                )
             if args.command == "policy":
                 return team_cli.policy(args.action, args.service, args.file, url, token, client)
             if args.command == "waiver":
