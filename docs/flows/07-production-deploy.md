@@ -1,6 +1,6 @@
 # 7. Production deploy
 
-[← All flows](README.md) · Step 7 of 14
+[← All flows](README.md) · Step 7 of 13
 
 **Callers:** monitoring, the incident tool and release management (webhooks); the **deploy
 system's** pipeline (`cqp gate --stage prod-deploy`); Argo Rollouts after the canary.
@@ -29,15 +29,13 @@ plus the service's production state:
 If CQP can't be reached at `prod-deploy`, the gate asks for approval (exit 2) instead of carrying on.
 
 A `REQUIRE_VALIDATION` from CQP itself is approved with `cqp approve --decision <id> --reason ...`
-by an approver of the service who didn't start the deploy ([flow 14](14-approvals-flaky-preview.md)).
+by an approver of the service who didn't start the deploy ([flow 13](13-approvals-flaky-preview.md)).
 
 **Which evidence counts.** The image's evidence is what its trusted build says: the image→commit
 link is recorded only from a protected branch. A result about the image uploaded from an
 unprotected branch, on another commit, can only make the decision stricter: its failure counts,
 its pass is ignored. Findings already on the protected branch are *not* relaxed here, unlike
 earlier stages: production judges the image as it is.
-
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *07 · Production deploy*, which uses a new throwaway `e2e-svc-pm-…` service each run.
 
 ---
 

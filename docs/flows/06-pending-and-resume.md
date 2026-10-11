@@ -1,6 +1,6 @@
 # 6. Pending decisions and resume
 
-[← All flows](README.md) · Step 6 of 14
+[← All flows](README.md) · Step 6 of 13
 
 **Callers:** the gate job, then the notifier (which calls GitLab).
 
@@ -28,8 +28,6 @@ passed, or the caller's own uploads aren't stored yet, the answer is:
 The 60-second wait for the caller's own uploads counts from that gate job's first request. A
 pipeline retried an hour later is a new job with new uploads, so it gets its own minute instead of
 being decided on the old results.
-
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *06 · Pending decision*. Watch `docker compose logs -f notifier` for the retry.
 
 ---
 

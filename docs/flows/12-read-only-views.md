@@ -1,6 +1,6 @@
 # 12. Read-only views
 
-[← All flows](README.md) · Step 12 of 14
+[← All flows](README.md) · Step 12 of 13
 
 No token needed, except for a full decision record: it carries the evidence the decision was
 made on (failing tests, CVE IDs), so it needs any valid CQP token. The portal shows outcomes only.
@@ -17,8 +17,4 @@ made on (failing tests, CVE IDs), so it needs any valid CQP token. The portal sh
 
 ---
 
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *12 · Read-only views*.
-
----
-
-[← 11. What CQP calls: GitLab and Slack](11-notifications.md) · [13. Testing with Postman →](13-postman-testing.md)
+[← 11. What CQP calls: GitLab and Slack](11-notifications.md) · [13. Approvals, flaky tests and checking locally →](13-approvals-flaky-preview.md)

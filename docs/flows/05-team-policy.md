@@ -1,6 +1,6 @@
 # 5. Team policy
 
-[← All flows](README.md) · Step 5 of 14
+[← All flows](README.md) · Step 5 of 13
 
 **Caller:** the `quality-policy` job, only when `.quality/policy.yaml` changes.
 
@@ -32,7 +32,7 @@ A dry run publishes nothing. Unknown keys, or loosening a locked baseline cell (
 contract tests at integration, secrets), give a `422` with the reasons. `GET
 /v1/team-policies/{service}` returns the current version and policy, no token needed.
 
-Every later decision for the service uses it and records its version. In the Postman example,
+Every later decision for the service uses it and records its version. In the seeded example (`scripts/seed.sh`),
 checkout-web's load test reports p95 212 ms against the team's 150 ms limit, so the integration
 gate answers `REQUIRE_VALIDATION` from `team.perf.load.threshold`.
 
@@ -78,8 +78,6 @@ Rules for writing one:
 
 To see a policy's effect without publishing it, run `cqp policy check`. To see exactly how OPA
 reads a team policy, see [OPA examples](../opa-examples.md) 04, 05, 06 and 14.
-
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *05 · Team policy*.
 
 ---
 

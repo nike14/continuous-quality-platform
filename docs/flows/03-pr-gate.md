@@ -1,6 +1,6 @@
 # 3. PR gate: blocked, then fixed
 
-[← All flows](README.md) · Step 3 of 14
+[← All flows](README.md) · Step 3 of 13
 
 **Callers:** the MR pipeline's report jobs, then its gate job (`cqp gate --stage pr`).
 
@@ -51,8 +51,6 @@
    with a new job ID. The newer run wins, so the next gate request returns `PROCEED`.
 
 `GET /v1/decisions/{decision_id}` returns a stored decision with its full `input`: the audit trail.
-
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *03 · PR gate*.
 
 ---
 

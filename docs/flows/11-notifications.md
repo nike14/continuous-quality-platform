@@ -1,6 +1,6 @@
 # 11. What CQP calls: GitLab and Slack
 
-[← All flows](README.md) · Step 11 of 14
+[← All flows](README.md) · Step 11 of 13
 
 The notifier reads every decision from Kafka and calls GitLab with a bot token (`CQP_GITLAB_API`,
 `CQP_GITLAB_TOKEN`; `src/cqp/notify/gitlab.py`):
@@ -16,12 +16,10 @@ Project, pipeline, job and commit come from the caller's token; only the MR numb
 request body.
 
 In adoption mode `shadow` nothing is posted; in `advisory` the comment is marked advisory and the
-status stays green (`policy/catalog.yaml`; see *Adoption modes* in the [README](../../README.md#adoption-modes)).
+status stays green (`policy/catalog.yaml`; see *Rolling it out without breaking anyone* in the [walkthrough](../WALKTHROUGH.md#8-rolling-it-out-without-breaking-anyone)).
 
 Locally `CQP_GITLAB_API` isn't set, so the notifier **logs** what it would post instead:
 `docker compose logs -f notifier`.
-
----
 
 ---
 

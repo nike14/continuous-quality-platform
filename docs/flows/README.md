@@ -1,8 +1,8 @@
 # CQP API flows
 
 How CQP is called from the API side: who calls each endpoint in real life, what the request carries,
-where each value comes from, and what CQP answers. Each flow ends with the Postman requests that act
-it out, so you can test it by hand.
+where each value comes from, and what CQP answers. To act the flows out against a running
+stack, run `scripts/seed.sh` or `scripts/e2e.sh`.
 
 For what happens *inside* CQP (which file, which function), see [WALKTHROUGH.md](../WALKTHROUGH.md).
 
@@ -25,19 +25,16 @@ ends with a link to the next.
 | 10 | [When rules are set, and changing them mid-flow](10-rules-mid-flow.md) | Platform team, teams, approvers | When each kind of rule takes effect; a live example of a rule added mid-flow |
 | 11 | [What CQP calls: GitLab and Slack](11-notifications.md) | The notifier | GitLab MR notes, commit statuses, job retry; Slack |
 | 12 | [Read-only views](12-read-only-views.md) | Anyone (a token for a full decision) | `GET /portal` and the `GET` endpoints |
-| 13 | [Testing with Postman](13-postman-testing.md) | You | Setup, how the collection imitates CI, the order to run it in |
-| 14 | [Approvals, flaky tests and checking locally](14-approvals-flaky-preview.md) | Approvers, developers | `POST /v1/decisions/{id}/approvals`, `GET /v1/flaky`, `POST /v1/preview`, `cqp explain` |
+| 13 | [Approvals, flaky tests and checking locally](13-approvals-flaky-preview.md) | Approvers, developers | `POST /v1/decisions/{id}/approvals`, `GET /v1/flaky`, `POST /v1/preview`, `cqp explain` |
 
 - **Steps 1 and 2** are the basics every other flow builds on.
 - **Steps 3 to 9** are the flows, from the first MR to production.
 - **Step 10** explains when rules take effect, and what happens when they change mid-flow.
 - **Steps 11 and 12** are what CQP does after deciding, and how to look at the results.
-- **Step 13** is how to try every flow yourself in Postman.
-- **Step 14** is the ways past a decision that aren't emergencies: approving, quarantining a flaky
+- **Step 13** is the ways past a decision that aren't emergencies: approving, quarantining a flaky
   test, and checking locally first.
 
 ## The four outcomes
-
 
 | Outcome | Meaning | `cqp gate` exit code |
 | --- | --- | --- |
@@ -83,8 +80,6 @@ People: cqp waiver / kill-switch / break-glass, portal ───┘
 All of these go to one URL. The gateway (`Caddyfile`) sends `/v1/decisions*`, `/v1/team-policies*`,
 `/v1/waivers*`, `/v1/kill-switches*` and `/portal*` to the Decision API, and everything else
 (`/v1/reports`, `/v1/hooks/*`, `/metrics`) to the ingestion API.
-
----
 
 ---
 

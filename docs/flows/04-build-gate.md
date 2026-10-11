@@ -1,6 +1,6 @@
 # 4. Build gate: waiver and break-glass
 
-[← All flows](README.md) · Step 4 of 14
+[← All flows](README.md) · Step 4 of 13
 
 **Callers:** build pipeline jobs, then security (`cqp waiver`) and on-call (`cqp break-glass`).
 
@@ -40,8 +40,6 @@
    Response `201` with `break_glass_id`. It is tied to that decision's service, image or commit, and
    stage. The gate job must be **re-run by hand**; it then answers `PROCEED_WITH_WARNING`, with every
    finding turned into a warning and a `baseline.break_glass` finding added.
-
-**Test it in Postman** ([setup](13-postman-testing.md)): folder *04 · Build gate*.
 
 ---
 

@@ -1,6 +1,6 @@
 # 10. When rules are set, and changing them mid-flow
 
-[← All flows](README.md) · Step 10 of 14
+[← All flows](README.md) · Step 10 of 13
 
 **Rules are applied when the gate asks, not when evidence is uploaded.** An upload only stores facts
 about a change (passed or failed, counts, failing test names, CVE IDs, p95 latency). Every
@@ -152,7 +152,7 @@ changed is recorded in each decision's `input`.
 
 ### Try it yourself
 
-In Postman: folder *10 · Rules changed mid-flow* runs these exact steps, with a check on each ([setup](13-postman-testing.md)). Or from a terminal:
+From a terminal:
 
 ```bash
 U=http://localhost:8080

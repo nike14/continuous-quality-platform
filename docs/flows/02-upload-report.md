@@ -1,6 +1,6 @@
 # 2. Upload a report
 
-[← All flows](README.md) · Step 2 of 14
+[← All flows](README.md) · Step 2 of 13
 
 **Caller:** any CI job extending `.quality-report`, via `cqp report`.
 
@@ -50,8 +50,6 @@ run separately, so they need shared storage like S3.
 
 Why keep the original file at all, and why not in Kafka or Postgres: see *Raw report files (object
 storage)* in [WALKTHROUGH.md](../WALKTHROUGH.md#raw-report-files-object-storage).
-
-**Test it in Postman** ([setup](13-postman-testing.md)): every folder starts with uploads; folder *99 · Refused requests* shows the 401, 403 and 422 cases.
 
 ---
 

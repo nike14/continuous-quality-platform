@@ -1,6 +1,6 @@
-# 14. Approvals, flaky tests and checking locally
+# 13. Approvals, flaky tests and checking locally
 
-[← All flows](README.md) · Step 14 of 14
+[← All flows](README.md) · Step 13 of 13
 
 Three ways CQP helps a person instead of only stopping them: someone can **approve** what needs a
 look, **flaky** tests are named instead of hidden by a rerun, and a developer can **preview** a
@@ -69,4 +69,4 @@ next: fix, rerun, ask for a waiver, approve, or quarantine.
 
 ---
 
-[← 13. Testing with Postman](13-postman-testing.md) · [All flows](README.md)
+[← 12. Read-only views](12-read-only-views.md) · [All flows](README.md)
