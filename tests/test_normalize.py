@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+from pathlib import Path
 
 import pytest
 from cqp.store.normalize import BadEventError, normalize
@@ -229,3 +230,39 @@ def test_json_of_the_wrong_shape_is_parked(fmt, data):
     # Regression (found by the test above): these raised AttributeError and crashed the worker.
     with pytest.raises(BadEventError):
         normalize(event(fmt), files(data))
+
+
+EXAMPLES = Path(__file__).parent.parent / "examples" / "reports"
+
+
+def test_schema_compat_names_each_incompatible_subject_with_the_registrys_reason():
+    files = lambda ref: [  # noqa: E731
+        ("orders-value.json", (EXAMPLES / "schema-orders-value.json").read_bytes()),
+        ("payments-value.json", b'{"is_compatible": true}'),
+    ]
+    s = normalize(event("schema-compat", "contract.schema"), files)
+    assert (s["kind"], s["status"]) == ("outcome", "fail")
+    assert s["payload"]["failing"] == ["orders-value"] and s["payload"]["total"] == 2
+    assert "currency" in s["payload"]["messages"][0]
+
+
+@pytest.mark.parametrize("data", [b'{"is_compatible": "yes"}', b"{}", b"[]"])
+def test_a_schema_answer_of_the_wrong_shape_is_parked(data):
+    with pytest.raises(BadEventError):
+        normalize(event("schema-compat", "contract.schema"), files(data))
+
+
+def test_squawk_fails_destructive_steps_and_lists_long_locks():
+    s = normalize(event("squawk", "db.migration"), files((EXAMPLES / "squawk.json").read_bytes()))
+    assert (s["kind"], s["status"]) == ("findings", "fail")
+    assert s["payload"] == {
+        "total": 3,
+        "failing": ["ban-drop-column migrations/0042_orders.sql:3"],
+        "locking": ["require-concurrent-index-creation migrations/0042_orders.sql:7"],
+    }
+
+
+def test_squawk_style_rules_alone_pass():
+    data = b'[{"file": "m.sql", "line": 1, "rule_name": "prefer-text-field"}]'
+    s = normalize(event("squawk", "db.migration"), files(data))
+    assert s["status"] == "pass" and s["payload"]["locking"] == []

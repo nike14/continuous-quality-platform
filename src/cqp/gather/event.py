@@ -16,6 +16,8 @@ Check = Literal[
     "tests.api",
     "tests.contract",
     "tests.e2e",
+    "contract.schema",
+    "db.migration",
     "scan.sca",
     "scan.container",
     "scan.secrets",
@@ -25,7 +27,7 @@ Check = Literal[
 ]
 # Formats a CI job may upload: each has a parser in the store worker. Pact results come from the
 # Pact Broker webhook instead. "json" is only for build provenance, which needs no parsing.
-Format = Literal["junit", "sarif", "cyclonedx", "k6", "json"]
+Format = Literal["junit", "sarif", "cyclonedx", "k6", "schema-compat", "squawk", "json"]
 
 
 class ReportMeta(BaseModel):

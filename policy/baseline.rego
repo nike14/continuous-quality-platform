@@ -23,12 +23,18 @@ on_fail := {
 	"scan.container": {"pr": "warn", "build": "block", "integration": "block", "prod-deploy": "block"},
 	# Only error-level issues fail a SARIF report; a team may soften this, it isn't locked.
 	"static.quality": {"pr": "warn", "build": "block"},
+	# An incompatible event schema breaks consumers the producer may not know about.
+	"contract.schema": {"pr": "warn", "build": "block", "integration": "block", "prod-deploy": "block"},
+	# A destructive migration step (dropping a column the running version reads) loses data.
+	"db.migration": {"pr": "warn", "build": "block", "prod-deploy": "block"},
 }
 
 # Organisation-wide cells: a team policy may make them stricter, never looser.
 locked := {
 	"tests.unit": {"prod-deploy"},
 	"tests.contract": {"integration", "prod-deploy"},
+	"contract.schema": {"build", "integration", "prod-deploy"},
+	"db.migration": {"build", "prod-deploy"},
 	"tests.integration": {"prod-deploy"},
 	"scan.sca": {"build", "integration", "prod-deploy"},
 	"scan.secrets": {"pr", "build", "prod-deploy"},
@@ -39,7 +45,7 @@ locked := {
 rank := {"warn": 1, "validate": 2, "block": 3}
 
 # Only a security approver may waive these; nobody may waive the second set (break-glass instead).
-security_rules := {"baseline.tests.contract", "baseline.scan.sca", "baseline.scan.secrets", "baseline.scan.container"}
+security_rules := {"baseline.tests.contract", "baseline.contract.schema", "baseline.scan.sca", "baseline.scan.secrets", "baseline.scan.container"}
 
 not_waivable := {"baseline.evidence_required", "baseline.change_freeze"}
 
@@ -142,6 +148,21 @@ raw contains f if {
 missing_message(m) := sprintf("%s result is too old to count; run it again", [m.check]) if m.stale
 
 else := sprintf("%s did not report before its deadline", [m.check])
+
+# A migration that holds long locks on a table (an index built without CONCURRENTLY, a new
+# NOT NULL column) can stall the service while it runs: a person checks the rollout plan.
+raw contains f if {
+	input.stage in {"build", "integration", "prod-deploy"}
+	e := input.evidence["db.migration"]
+	locks := object.get(e.payload, "locking", [])
+	count(locks) > 0
+	f := {
+		"rule": "baseline.db.locking",
+		"effect": "validate",
+		"message": sprintf("db.migration takes long locks: %s; check the rollout plan", [concat(", ", locks)]),
+		"items": locks,
+	}
+}
 
 # A team's own limit on a measurement, e.g. p95 latency.
 raw contains f if {

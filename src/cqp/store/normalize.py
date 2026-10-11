@@ -79,7 +79,85 @@ def k6(files: Files):
     return "measurement", "pass", {"metric": "p95_ms", "value": p95, "unit": "ms"}
 
 
-PARSERS = {"junit": junit, "sarif": sarif, "cyclonedx": cyclonedx, "k6": k6}
+def schema_compat(files: Files):
+    """Schema-registry compatibility, one file per subject: the registry's answer to
+    POST /compatibility/subjects/<subject>/versions/latest, saved as <subject>.json."""
+    failing: list[str] = []
+    messages: list[str] = []
+    for name, data in files:
+        answer = json.loads(data)
+        compatible = answer["is_compatible"]
+        if not isinstance(compatible, bool):
+            raise ValueError("is_compatible is not true or false")
+        subject = name.removesuffix(".json")
+        if not compatible:
+            failing.append(subject)  # what a waiver names, like a CVE ID
+            messages += [f"{subject}: {m}" for m in answer.get("messages", [])]
+    return (
+        "outcome",
+        "fail" if failing else "pass",
+        # The registry's own reasons, capped: enough to say what broke, never a whole schema.
+        {
+            "total": len(files),
+            "failed": len(failing),
+            "failing": failing,
+            "messages": messages[:10],
+        },
+    )
+
+
+# Steps that break the running version or lose data: they fail the migration check.
+DESTRUCTIVE = {
+    "ban-drop-column",
+    "ban-drop-table",
+    "ban-drop-database",
+    "ban-drop-not-null",
+    "renaming-column",
+    "renaming-table",
+    "changing-column-type",
+}
+# Steps that hold long locks on a busy table: worth a person's look, not a block.
+LOCKING = {
+    "require-concurrent-index-creation",
+    "require-concurrent-index-deletion",
+    "adding-field-with-default",
+    "adding-foreign-key-constraint",
+    "adding-not-nullable-field",
+    "adding-required-field",
+    "constraint-missing-not-valid",
+    "disallowed-unique-constraint",
+}
+
+
+def squawk(files: Files):
+    """Postgres migration lint (`squawk --reporter json`): destructive steps fail the check;
+    long-lock steps are listed for the baseline's locking rule; style rules are only counted."""
+    failing: list[str] = []
+    locking: list[str] = []
+    total = 0
+    for _, data in files:
+        for v in json.loads(data):
+            total += 1
+            where = f"{v['rule_name']} {v['file']}:{v['line']}"
+            if v["rule_name"] in DESTRUCTIVE:
+                failing.append(where)
+            elif v["rule_name"] in LOCKING:
+                locking.append(where)
+    return (
+        "findings",
+        "fail" if failing else "pass",
+        {"total": total, "failing": failing, "locking": locking},
+    )
+
+
+PARSERS = {
+    "junit": junit,
+    "sarif": sarif,
+    "cyclonedx": cyclonedx,
+    "k6": k6,
+    "schema-compat": schema_compat,
+    "squawk": squawk,
+}
 
 
 # Webhook formats arrive already parsed by their adapter; only the kind is needed here.

@@ -2,7 +2,7 @@
 
 CQP answers one question at every delivery stage: **is there enough evidence to let this change
 move on?** It reads the results teams' tools already produce (JUnit, SARIF, CycloneDX, k6,
-webhooks), judges them against versioned rules in OPA, and returns one of four explained outcomes
+schema-registry answers, squawk migration lint, webhooks), judges them against versioned rules in OPA, and returns one of four explained outcomes
 that pipelines act on: `PROCEED`, `PROCEED_WITH_WARNING`, `REQUIRE_VALIDATION` or `BLOCKED`.
 
 This repository is a working slice of it: four deployables (ingestion API, store worker,
@@ -82,4 +82,4 @@ under the same rules; `cqp explain <decision>` says what to do about each findin
 | `scripts/` | Dev token, demo, seed, end-to-end checks |
 
 What is design-only (S3, SSO, signed provenance, tracing and more) is listed in
-[DESIGN.md, Appendix A](docs/DESIGN.md#appendix-a-design-to-code).
+[DESIGN.md, section 14](docs/DESIGN.md#14-prototype-evidence-gaps-and-resources).
