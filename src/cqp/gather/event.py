@@ -68,10 +68,12 @@ def raw_event(
     payload: dict | None = None,
     content: str = "",
     observed_at: str | None = None,
+    trusted: bool = True,
 ) -> dict:
     """Builds the event that goes on the raw Kafka topic.
 
     observed_at is when the result was produced, if the sender knows; otherwise when it arrived.
+    trusted: a signed webhook, or a CI job on a protected branch (see store.db.latest).
     """
     received_at = datetime.now(UTC).isoformat()
     return {
@@ -91,4 +93,5 @@ def raw_event(
         # replace a newer one. received_at measures how long evidence takes to arrive.
         "observed_at": observed_at or received_at,
         "received_at": received_at,
+        "trusted": trusted,
     }

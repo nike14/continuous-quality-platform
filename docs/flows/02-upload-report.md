@@ -1,6 +1,6 @@
 # 2. Upload a report
 
-[← All flows](README.md) · Step 2 of 13
+[← All flows](README.md) · Step 2 of 14
 
 **Caller:** any CI job extending `.quality-report`, via `cqp report`.
 

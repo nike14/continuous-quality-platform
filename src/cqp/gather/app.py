@@ -111,6 +111,9 @@ def create_app(
             image=m.image,
             content=digest(saved),
             observed_at=job_started(claims),
+            # Anyone who can push a branch can run a job on it; only protected branches have
+            # been through review. See store.db.latest for what an untrusted result may do.
+            trusted=str(claims.get("ref_protected")).lower() == "true",
         )
         # Files first: the event only points at them, and the store worker reads them back.
         event["raw_ref"] = store(event["event_id"], saved)

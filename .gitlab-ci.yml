@@ -26,3 +26,17 @@ test:
     CQP_REQUIRE_DOCKER: "1"
   script:
     - uv run pytest -q
+
+# A baseline change affects every team. On an MR that touches it, show which recent decisions
+# across all services it would change, before it is merged and released. It asks the live CQP
+# with this job's token (the platform team's role); CQP_URL is a group-level variable.
+baseline-backtest:
+  stage: test
+  id_tokens:
+    CQP_TOKEN:
+      aud: cqp
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: [policy/baseline.rego]
+  script:
+    - uv run cqp baseline backtest --file policy/baseline.rego

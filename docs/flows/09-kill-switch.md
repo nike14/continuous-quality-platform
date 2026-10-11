@@ -1,6 +1,6 @@
 # 9. Kill switch
 
-[← All flows](README.md) · Step 9 of 13
+[← All flows](README.md) · Step 9 of 14
 
 **Caller:** the platform team (`cqp_role: platform`), when a rule is wrong for everyone (for example
 a bad rule release).

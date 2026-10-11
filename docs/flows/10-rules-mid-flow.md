@@ -1,6 +1,6 @@
 # 10. When rules are set, and changing them mid-flow
 
-[← All flows](README.md) · Step 10 of 13
+[← All flows](README.md) · Step 10 of 14
 
 **Rules are applied when the gate asks, not when evidence is uploaded.** An upload only stores facts
 about a change (passed or failed, counts, failing test names, CVE IDs, p95 latency). Every

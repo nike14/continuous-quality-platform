@@ -1,0 +1,18 @@
+# A team with two known-flaky e2e tests, and a load test it compares with the protected branch.
+# A failing tests.e2e whose failing tests are all listed here only warns:
+#   "tests.e2e failed: ... (quarantined under QA-12)". One more failing test and it blocks again.
+# Find candidates with GET /v1/flaky?service=... (tests that failed, then passed on the same commit).
+# Bounds: test checks only (never contract tests or scans), at most 10 tests each, and a ticket.
+
+quarantine:
+  tests.e2e:
+    ticket: QA-12
+    tests: [CheckoutFlow.applePay, CheckoutFlow.savedCard]
+
+# p95 may be at most 10% worse than the protected branch's last load test, and never over 400 ms.
+# Without max_increase_pct the baseline still warns at +20% (baseline.perf.regression).
+thresholds:
+  perf.load: {max: 400, max_increase_pct: 10, effect: validate}
+
+on_fail:
+  tests.e2e: {integration: block}   # stricter than the baseline, now that the flaky ones are out

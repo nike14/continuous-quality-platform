@@ -1,6 +1,6 @@
 # 4. Build gate: waiver and break-glass
 
-[← All flows](README.md) · Step 4 of 13
+[← All flows](README.md) · Step 4 of 14
 
 **Callers:** build pipeline jobs, then security (`cqp waiver`) and on-call (`cqp break-glass`).
 

@@ -1,6 +1,6 @@
 # 3. PR gate: blocked, then fixed
 
-[← All flows](README.md) · Step 3 of 13
+[← All flows](README.md) · Step 3 of 14
 
 **Callers:** the MR pipeline's report jobs, then its gate job (`cqp gate --stage pr`).
 

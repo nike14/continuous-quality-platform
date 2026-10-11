@@ -1,8 +1,10 @@
 """`cqp gate`: the golden-path CI step.
 
-Asks CQP for a decision and turns it into an exit code.
+Asks CQP for a decision and turns it into an exit code: 0 proceed (or warn), 1 blocked,
+2 needs a person (approval), 3 still waiting for evidence (CQP re-runs the job).
 """
 
+import json
 import os
 import sys
 import time
@@ -13,7 +15,14 @@ import httpx
 STATE = Path(".cqp")
 # A warning doesn't stop the pipeline; it shows in the job log and the MR comment.
 EXIT = {"PROCEED": 0, "PROCEED_WITH_WARNING": 0, "BLOCKED": 1, "REQUIRE_VALIDATION": 2}
+# Still waiting for evidence: not a person's call yet, so not 2. CQP re-runs the job later.
+PENDING = 3
 POLL_SECONDS = 5
+# Checks the baseline blocks at every stage it judges them. If this pipeline's own report for one
+# of them failed, the gate stops even when CQP can't be asked: known-bad never goes through.
+FALLBACK_BLOCKING = frozenset(
+    {"tests.unit", "tests.component", "tests.integration", "scan.secrets"}
+)
 
 
 def say(msg: str) -> None:
@@ -21,9 +30,33 @@ def say(msg: str) -> None:
     print(f"cqp: {msg}", file=sys.stderr)
 
 
+def local_failures() -> list[str]:
+    """Blocking checks this pipeline's own reports failed, as `cqp report` recorded them."""
+    failed = set()
+    for f in sorted((STATE / "results").glob("*.json")):
+        try:
+            r = json.loads(f.read_text())
+        except ValueError:
+            continue  # a half-written file says nothing
+        if (
+            isinstance(r, dict)
+            and r.get("status") == "fail"
+            and r.get("check") in FALLBACK_BLOCKING
+        ):
+            failed.add(r["check"])
+    return sorted(failed)
+
+
 def fallback(stage: str, reason: str) -> int:
     """What the gate does when CQP can't be reached."""
-    # Fail-mode matrix: carry on with a warning, except production, which needs an approval.
+    # Fail-mode matrix: what we know is bad stops the pipeline anyway. What we don't know
+    # carries on with a warning, except production, which needs an approval.
+    if failed := local_failures():
+        say(
+            f"CQP unavailable ({reason}); "
+            f"this pipeline's own {', '.join(failed)} failed, so stopping"
+        )
+        return EXIT["BLOCKED"]
     say(
         f"CQP unavailable ({reason}); "
         f"{'approval needed' if stage == 'prod-deploy' else 'continuing'}"
@@ -111,4 +144,9 @@ def gate(
         if EXIT[d["outcome"]] != 0 or d["status"] == "pending":
             say(f"{mode} mode: this would be {d['outcome']} once enforced; carrying on")
         return 0
+    if d["status"] == "pending":
+        say("still waiting for evidence: CQP re-runs this job when it arrives or at its deadline")
+        return PENDING
+    if d["outcome"] != "PROCEED":
+        say(f"why, and what you can do: cqp explain {d['decision_id']}")
     return EXIT[d["outcome"]]

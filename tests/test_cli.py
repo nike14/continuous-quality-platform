@@ -1,5 +1,6 @@
 """`cqp report` against a fake CQP. The rule throughout: it never fails the CI job."""
 
+import json
 from pathlib import Path
 
 import httpx
@@ -78,3 +79,22 @@ def test_no_matching_files_sends_nothing():
     client, calls = client_returning(202)
     result = report("s", "tests.unit", "junit", "nothing/*.xml", "https://cqp", "tok", client)
     assert result == 0 and calls == []
+
+
+def test_records_the_reports_result_locally_even_when_cqp_is_down(monkeypatch):
+    # The gate's fallback reads this if CQP can't be asked.
+    monkeypatch.setenv("CI_JOB_ID", "77")
+    Path("reports/junit.xml").write_text(
+        '<testsuite><testcase classname="A" name="b"><failure/></testcase></testsuite>'
+    )
+    client, _ = client_returning("down")
+    assert run(client) == 0
+    result = json.loads(Path(".cqp/results/77-tests.unit.json").read_text())
+    assert result == {"check": "tests.unit", "status": "fail", "failing": ["A.b"]}
+
+
+def test_an_unreadable_report_is_still_uploaded_but_not_recorded_locally():
+    Path("reports/junit.xml").write_text("<not xml")
+    client, calls = client_returning(202)
+    assert run(client) == 0
+    assert len(calls) == 1 and not Path(".cqp/results").exists()

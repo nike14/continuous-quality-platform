@@ -24,8 +24,11 @@ The answer is always one of four outcomes:
 | --- | --- | --- |
 | `PROCEED` | All good | 0 |
 | `PROCEED_WITH_WARNING` | Fine, but something should be looked at | 0 |
-| `REQUIRE_VALIDATION` | A person must approve, or evidence is still missing | 2 |
+| `REQUIRE_VALIDATION` | A person must approve (`cqp approve`) | 2 |
 | `BLOCKED` | Must not move on | 1 |
+
+While evidence is still on its way the answer is `REQUIRE_VALIDATION` with `status: pending`;
+the gate exits **3** for that, and CQP re-runs the job later (step 7).
 
 The stages a change goes through: `pr` → `build` → `integration` → `prod-deploy`.
 
@@ -161,8 +164,12 @@ In order:
   120 s (`--max-wait`).
 - It prints every finding into the job log, then exits with the code from the table in
   section 1.
-- If CQP can't be reached: continue with a warning, except `prod-deploy`, which asks for
-  approval (exit 2). This is the `fallback()` function.
+- Still pending after `--max-wait`: exit 3. The notifier re-runs the job when the evidence lands.
+- If CQP can't be reached (`fallback()`): stop if this pipeline's own unit, component or
+  integration tests or secrets scan failed (`cqp report` wrote their pass/fail to
+  `.cqp/results/`, see `local_failures()`); otherwise continue with a warning, except
+  `prod-deploy`, which asks for approval (exit 2).
+- When the outcome isn't a clean proceed it prints `cqp explain <decision>`.
 - If CQP **refuses** the request (bad token, wrong repo): exit 1, so a misconfigured pipeline
   doesn't silently pass.
 
@@ -177,7 +184,9 @@ In order:
 2. **What is this decision about?** The image if there is one, else the commit (`subject`).
 3. **Read the evidence:** `latest()` in `src/cqp/store/db.py` returns the newest result per check
    for this image or commit. Results on the commit also count for an image built from it
-   (via the `builds` table). If one run sent several reports, any failure wins.
+   (via the `builds` table, written only by trusted builds). If one run sent several reports,
+   any failure wins. At `prod-deploy` (`trusted_only`), a result about the image from an
+   unprotected branch on another commit can only make things stricter: its pass is ignored.
 4. **Drop stale results:** a security scan older than `max_age_days` (7) counts as missing.
 5. **What is expected?** `policy/expectations.yaml` lists which checks each stage expects, per
    tier (tier comes from `policy/catalog.yaml`). Each has a `deadline` (minutes) and an
@@ -186,11 +195,19 @@ In order:
    not-yet-reported checks into:
    - **waiting:** still before its deadline (counted from the first time anyone asked), and
    - **missing:** deadline passed.
+
+   The caller's own uploads (`event_ids`) that aren't stored yet are waited for during that
+   gate job's first minute (`db.first_asked(..., job_id=...)`).
 7. **Never decide on half the evidence.** If anything is waiting, the answer is
    `status: pending` with the list of what it's waiting for. The rules are not run yet.
 8. **Gather everything the rules need** into one `policy_input`: evidence, missing checks,
-   team policy, active waivers, kill switches, break-glass, and (for `prod-deploy`) production
-   state from `db.runtime()`.
+   team policy, active waivers, kill switches, break-glass, approvals, and (for `prod-deploy`)
+   production state from `db.runtime()`. Plus two things from other results, both in
+   `store/db.py`:
+   - `reruns()`: checks that pass now but failed in an earlier run of the same change
+     (likely flaky);
+   - `baseline()`: each check's last trusted result on another commit, which tells new findings
+     from existing ones and gives measurements something to compare with.
 9. **Run the rules:** `policy.evaluate()` in `src/cqp/decide/policy.py` sends the input to OPA,
    which runs `policy/baseline.rego`, and gets back a list of **findings**. Each finding has a
    `rule`, an `effect` (warn / validate / block) and a plain-English `message`.
@@ -358,9 +375,12 @@ shape the **next** decision.
 | --- | --- | --- |
 | **Team policy** | A team's `.quality/policy.yaml`: wait for extra checks, tighten effects, set limits like "p95 under 150 ms". Checked and backtested on the MR, published from the main branch. | `src/cqp/decide/team.py` (shape), `put_team_policy()` and `backtest()` in `app.py`, bounds in `baseline.rego`, example in `examples/team-policy.yaml` |
 | **Waiver** | "Accept this known finding for N days" (max 30). Can name exact items like a CVE ID. Still shown, only warns. | `create_waiver()` in `app.py`, `apply_waiver` in `baseline.rego`, `cqp waiver` |
-| **Kill switch** | Platform team turns one broken rule into warn-only, everywhere, for up to 72 h | `kill()` in `app.py`, `cqp kill-switch` |
+| **Quarantine** | Known-flaky tests (at most 10 per check, under a ticket) only warn when they fail; anything else failing still blocks | `quarantine` in `team.py`, `quarantined()` in `baseline.rego`, candidates from `GET /v1/flaky` |
+| **Approval** | An approver who isn't the author accepts exactly the `validate` findings of one decision, for 24 h | `approve()` in `app.py`, `approved()` in `baseline.rego`, `cqp approve` |
+| **Kill switch** | Platform team turns one broken rule into warn-only, everywhere, for up to 72 h | `kill()` in `app.py`, `cqp kill-switch`; a baseline change is tried first with `cqp baseline backtest` |
 | **Break-glass** | On-call lets one change through one stage in an emergency. Always announced in Slack. | `break_glass()` in `app.py`, `cqp break-glass` |
-| **Portal** | One web page listing waivers, kill switches, break-glass, services and recent decisions | `src/cqp/decide/portal.py`, at `/portal` |
+| **Portal** | One web page listing waivers, kill switches, break-glass, approvals, flaky test candidates, services and recent decisions | `src/cqp/decide/portal.py`, at `/portal` |
+| **Preview and explain** | `cqp preview` judges local reports under the real rules and records nothing; `cqp explain` lists a decision's findings with what to do about each | `preview()` in `app.py`, `preview()`, `explain()` and `hint()` in `team_cli.py` |
 
 The CLI commands for these live in `src/cqp/gather/cli.py` (argument parsing) and
 `src/cqp/decide/team_cli.py` (the HTTP calls).
@@ -416,7 +436,7 @@ blocked?" before turning enforcement on. The mode is applied in `gate()` (`gate.
 | `decisions` | Decision API (`decide/db.py`) | Every decision, insert-only, with its full input |
 | `policy_versions` | Decision API at startup | Every `baseline.rego` ever used, for replay |
 | `team_policies` | Decision API | Every published team policy version |
-| `waivers`, `kill_switches`, `break_glass` | Decision API | Overrides and their history (revoked, not deleted) |
+| `waivers`, `kill_switches`, `break_glass`, `approvals` | Decision API | Overrides and their history (revoked, not deleted) |
 | `waiting_pipelines` | notifier (`notify/db.py`) | Gate jobs waiting for evidence |
 
 Kafka topics: `cqp.signals.raw` (new results), `cqp.signals.dlq` (results that couldn't be

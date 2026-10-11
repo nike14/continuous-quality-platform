@@ -1,9 +1,9 @@
 # 13. Testing with Postman
 
-[← All flows](README.md) · Step 13 of 13
+[← All flows](README.md) · Step 13 of 14
 
 `postman.json` at the repo root holds every flow above as a folder, with sample data and checks on
-each response (86 requests, 150 checks). Folder numbers match the step numbers of these docs, and
+each response (87 requests, 151 checks). Folder numbers match the step numbers of these docs, and
 every request's **Docs** tab says who calls it in real life, what it sends, what to expect and what
 to look at. The collection's own Docs tab explains tokens and how to read a decision.
 
@@ -77,4 +77,4 @@ step 13 is this page.
 
 ---
 
-[← 12. Read-only views](12-read-only-views.md) · [All flows →](README.md)
+[← 12. Read-only views](12-read-only-views.md) · [14. Approvals, flaky tests and checking locally →](14-approvals-flaky-preview.md)

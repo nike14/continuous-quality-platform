@@ -1,4 +1,5 @@
-"""The portal page: waivers, kill switches, break-glass, team policies and recent decisions.
+"""The portal page: waivers, kill switches, break-glass, approvals, flaky tests, team policies
+and recent decisions.
 
 Server-rendered for reading. Creating or revoking a waiver posts to the same API the CLI uses,
 with a token the person pastes in (in production: the company SSO session).
@@ -107,6 +108,28 @@ def render(view: dict, catalog: dict) -> str:
             ("created_at", "When"),
         ],
     )
+    approvals = _table(
+        view.get("approvals", []),
+        [
+            ("service", "Service"),
+            ("stage", "Stage"),
+            ("subject", "Change"),
+            ("reason", "Reason"),
+            ("ticket", "Ticket"),
+            ("approved_by", "By"),
+            ("created_at", "When"),
+        ],
+    )
+    flaky = _table(
+        view.get("flaky", []),
+        [
+            ("service", "Service"),
+            ("check", "Check"),
+            ("test", "Test"),
+            ("commits", "Commits it flaked on"),
+            ("last_seen", "Last seen"),
+        ],
+    )
     service_table = _table(
         services,
         [
@@ -153,6 +176,14 @@ def render(view: dict, catalog: dict) -> str:
 
 <h2>Break-glass, last 7 days</h2>
 {break_glass}
+
+<h2>Approvals, last 7 days</h2>
+{approvals}
+
+<h2>Flaky test candidates, last 14 days</h2>
+<p class="empty">Failed, then passed on the same commit. Quarantine one in the team's
+<code>.quality/policy.yaml</code> under a ticket, or fix it.</p>
+{flaky}
 
 <h2>Services</h2>
 {service_table}

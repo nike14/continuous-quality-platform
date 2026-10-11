@@ -1,6 +1,6 @@
 # 5. Team policy
 
-[← All flows](README.md) · Step 5 of 13
+[← All flows](README.md) · Step 5 of 14
 
 **Caller:** the `quality-policy` job, only when `.quality/policy.yaml` changes.
 
@@ -53,8 +53,10 @@ they list.
 | `performance-budget.yaml` | A p95 latency limit that blocks, also checked at build |
 | `judge-at-more-stages.yaml` | Judge checks at stages where the baseline ignores them (integration tests at build) |
 | `softer-where-allowed.yaml` | Loosen cells that aren't locked (flaky e2e tests only warn) |
+| `flaky-quarantine.yaml` | Quarantine two flaky e2e tests under a ticket; p95 at most 10% worse than the protected branch |
 | `rejected/loosens-locked-rules.yaml` | **422:** loosens secrets, contract and SCA cells |
 | `rejected/typos.yaml` | **422:** misspelt key, unknown stage, effect and check |
+| `rejected/quarantine-out-of-bounds.yaml` | **422:** quarantines a contract test, and too many e2e tests |
 
 Rules for writing one:
 
@@ -69,7 +71,10 @@ Rules for writing one:
 - **The baseline's expectations win.** An `extra_checks` entry for a check the baseline already
   expects at that stage is ignored. You can't shorten its deadline or soften its `on_missing`.
 - **Thresholds need a value.** They compare `payload.value`, which today only `perf.load` (k6 p95,
-  ms) has. They apply at every stage where that evidence is present.
+  ms) has. They apply at every stage where that evidence is present. `max` is absolute;
+  `max_increase_pct` compares with the protected branch's last value; set either or both.
+- **Quarantine is bounded.** Test checks only (never contract tests or scans), at most 10 tests per
+  check, each under a ticket. It only softens a failure whose failing tests are all listed.
 
 To see a policy's effect without publishing it, run `cqp policy check`. To see exactly how OPA
 reads a team policy, see [OPA examples](../opa-examples.md) 04, 05, 06 and 14.

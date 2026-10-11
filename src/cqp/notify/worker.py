@@ -44,6 +44,17 @@ def render(d: dict) -> str:
     lines += [f"- waiting for `{w.get('check') or w.get('event_id')}`" for w in d["waiting"]]
     if not d["findings"] and not d["waiting"]:
         lines.append("- all expected evidence is in and no rule objected")
+    # What happens next, so nobody reruns the pipeline to find out.
+    if d["status"] == "pending":
+        lines += ["", "_The gate job re-runs by itself when this arrives, or at its deadline._"]
+    elif d["outcome"] == "REQUIRE_VALIDATION":
+        lines += [
+            "",
+            "_A person must look: an approver of this service (not the author) can run "
+            f"`cqp approve --decision {d['decision_id']} --reason ...`, then re-run the gate job._",
+        ]
+    if d["status"] == "final" and d["outcome"] != "PROCEED":
+        lines.append(f"_What to do about each finding: `cqp explain {d['decision_id']}`._")
     lines += ["", f"<sub>decision `{d['decision_id']}` · policy `{d['policy_version']}`</sub>"]
     return "\n".join(lines)
 

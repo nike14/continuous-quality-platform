@@ -138,3 +138,11 @@ def test_an_upload_over_the_size_limit_is_refused(published):
         "/v1/reports", data={"meta": json.dumps(meta)}, files=files, headers=AUTH
     )
     assert r.status_code == 413 and published == []
+
+
+def test_an_upload_from_an_unprotected_branch_is_marked_untrusted(client, published):
+    # It still counts for the branch's own gates; in production it may only make things stricter.
+    meta = {"service": "payments-api", "check": "scan.sca", "format": "cyclonedx"}
+    upload(client, meta)
+    upload(client, meta, headers={"Authorization": "Bearer branch-token"})
+    assert [e["trusted"] for _, _, e in published] == [True, False]

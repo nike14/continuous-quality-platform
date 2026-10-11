@@ -1,6 +1,8 @@
 # CQP: gather, store, decide, notify
 
-A working end-to-end slice of the Continuous Quality Platform (CQP):
+A working end-to-end slice of the Continuous Quality Platform (CQP). The design behind it (the
+problem, the architecture, trade-offs, scale, build vs buy, adoption) is in
+[docs/DESIGN.md](docs/DESIGN.md); this README is how the slice works and how to run it.
 
 1. **Gather:** take the results tools already produce, check who sent them, keep the raw file and
    put a small event on Kafka.
@@ -66,7 +68,7 @@ outcomes at every stage, plus one gate still waiting for evidence, a published t
 End-to-end checks against the running stack (about 10 minutes, mostly the outage scenarios):
 
 ```bash
-./scripts/e2e.sh     # 22 checks: gate outcomes, trust, dead-letter, resume, outages; exit code = failures
+./scripts/e2e.sh     # gate outcomes, trust, approvals, dead-letter, resume, outages; exit code = failures
 ```
 
 It stops and restarts the Decision API and Kafka on purpose to check how CQP behaves when
@@ -119,6 +121,15 @@ Tool webhook ──────────┘      │ verify sender
   production). Otherwise a misconfigured pipeline would pass quietly.
 - **Webhooks:** each tool signs its body with a shared secret (`X-CQP-Signature: sha256=…`).
   A tool with no configured secret is rejected.
+- **Trusted evidence:** each signal records whether it came from a protected branch (the token's
+  `ref_protected`) or a signed webhook. Anyone who can push a branch can run a job that claims
+  to be about any image, so:
+  - only a trusted build links an image to the commit it was built from;
+  - at `prod-deploy`, a result about the image from an unprotected branch can only make things
+    stricter: its failure counts, its pass doesn't.
+
+  In production the image link would come from a signed build attestation (SLSA provenance,
+  checked with Sigstore) instead of the digest the build job writes.
 
 ### What gets published
 
@@ -206,9 +217,10 @@ there is one, and the event IDs this pipeline uploaded. The commit comes from th
    `deadline` in minutes and an `on_missing` effect.
 2. **Completeness.** A check that hasn't reported is **waiting** until its deadline, counted from
    the first time this change was asked about at this stage. After that it is **missing**. If the
-   caller's own uploads aren't stored yet, CQP waits for them for up to 60 seconds. A result older
-   than its `max_age_days` (security scans: 7 days) doesn't count either; the finding says it's
-   too old rather than missing.
+   caller's own uploads aren't stored yet, CQP waits for them for up to 60 seconds, counted from
+   that gate job's first request (a pipeline retried later has new uploads of its own). A result
+   older than its `max_age_days` (security scans: 7 days) doesn't count either; the finding says
+   it's too old rather than missing.
 3. **Never decide on half the evidence.** While anything is waiting, the answer is
    `status: pending` (outcome `REQUIRE_VALIDATION`) with the list of what it's waiting for.
    The gate polls every 5s; a repeat poll from the same job, still waiting on the same things,
@@ -221,6 +233,18 @@ there is one, and the event IDs this pipeline uploaded. The commit comes from th
    name and a plain message. If OPA has lost the
    rules (it restarted), CQP reloads them and asks again; it never reads "no answer" as "no
    findings", which would let everything through.
+
+   The input also carries what CQP knows from other results, so the rules can use it:
+   - **Reruns:** a check that passes now but failed in an earlier run of the *same change* gets a
+     `baseline.passed_on_rerun` warning naming the tests. Same code, different result: likely
+     flaky, and a rerun that made a failure go away is never silent.
+   - **The protected branch's last result** for each check, on another commit (`baseline`):
+     - *New vs existing findings.* Before production, an SCA, container or static-analysis
+       failure whose items are all already failing on the protected branch only warns ("not
+       introduced by this change"). New items keep the stage's effect and are named. Secrets are
+       never relaxed, and `prod-deploy` judges the image as it is.
+     - *Measurements.* p95 more than 20% above the protected branch's last value warns
+       (`baseline.perf.regression`); a team can set its own limit and effect (see below).
 5. **Outcome.** The strictest finding wins: `PROCEED`, `PROCEED_WITH_WARNING`,
    `REQUIRE_VALIDATION` or `BLOCKED`. There is no score.
 6. **Record and replay.** Every decision, pending or final, is inserted and never updated. It stores
@@ -235,10 +259,16 @@ while the answer is pending, up to `--max-wait` (120s by default).
 | --- | --- |
 | 0 | Proceed, or proceed with warning |
 | 1 | Blocked |
-| 2 | Needs validation: an approval or more evidence, or still pending after `--max-wait` |
+| 2 | Needs a person: an approver can accept it with `cqp approve` (see below) |
+| 3 | Still waiting for evidence after `--max-wait`; the notifier re-runs the job when it lands |
 
-If CQP can't be reached, the gate continues with a warning before production and asks for
-approval (exit 2) at `prod-deploy`.
+When the answer isn't a clean proceed, the gate prints `cqp explain <decision>`, which lists each
+finding with what you can do about it (fix, rerun, waiver, approve, quarantine).
+
+If CQP can't be reached, the gate still stops when this pipeline's own unit, component or
+integration tests or secrets scan failed: `cqp report` records each report's pass/fail in
+`.cqp/results/`, and those checks block at every stage the baseline judges them. Otherwise it
+continues with a warning before production and asks for approval (exit 2) at `prod-deploy`.
 
 ## How notifying works
 
@@ -255,7 +285,7 @@ notifications may lag, decisions may not.
 
 | What | When | How |
 | --- | --- | --- |
-| **MR comment** | The gate ran in an MR pipeline | One comment per MR, found by a hidden marker and updated in place. It shows the outcome, each finding with its rule, and what it's waiting for. |
+| **MR comment** | The gate ran in an MR pipeline | One comment per MR, found by a hidden marker and updated in place. It shows the outcome, each finding with its rule, what it's waiting for, and what happens next (the job re-runs by itself; who can approve; `cqp explain`). |
 | **Commit status** | Always, when there's a commit | `cqp/<stage>`: success for proceed or warning, failed for blocked, pending while waiting or needing validation |
 | **Slack** | Final `prod-deploy` decisions that aren't a clean proceed | One line with the reason and decision ID |
 | **Resume** | A decision was pending | See below |
@@ -329,7 +359,9 @@ extra_checks:            # wait for more checks before deciding
 on_fail:                 # effect of a failing check, per stage
   tests.e2e: {integration: block}
 thresholds:              # limits on measurements
-  perf.load: {max: 150, effect: validate}   # p95 ms
+  perf.load: {max: 150, max_increase_pct: 10, effect: validate}   # p95 ms, and % over the protected branch
+quarantine:              # known-flaky tests that only warn while the ticket is worked on
+  tests.e2e: {ticket: QA-12, tests: [CheckoutFlow.applesPay]}
 ```
 
 - **Bounds.** A team can add checks and tighten rules. It can't loosen a locked baseline cell
@@ -344,6 +376,32 @@ thresholds:              # limits on measurements
   read from the CI token). Each version is kept, and every decision records the
   `team_policy_version` it used, so replay still works.
 - The baseline's expectations always win over a team's `extra_checks` for the same check.
+- **Quarantine** is bounded in `baseline.rego`: only test checks (never contract tests or scans),
+  at most 10 tests per check, and a ticket. A failing check whose failing tests are all
+  quarantined only warns, `(quarantined under QA-12)`; one more failing test blocks again.
+  `GET /v1/flaky?service=` (and the portal) lists the candidates: tests that failed and then
+  passed on the same commit in the last 14 days.
+
+### Approvals
+
+`REQUIRE_VALIDATION` means a person must look. An approver of the service accepts it:
+
+```bash
+cqp approve --decision <id> --reason "p95 spike is the cold cache after the migration" --ticket PERF-3
+```
+
+then re-runs the gate job, which now gets `PROCEED_WITH_WARNING`:
+`... (approved by lead: p95 spike is the cold cache after the migration)`.
+
+- Only a **final** `REQUIRE_VALIDATION` decision can be approved. A block stays a block, and a
+  pending decision is waiting for evidence, not a person.
+- Approvers of the owning service (security: any service), and **never whoever started the job
+  that asked** (decisions record `requested_by`).
+- It covers exactly the `validate` findings in that decision (same rule, same message), for that
+  change and stage, for 24 hours. A new or different finding, like a worse load test, needs a
+  new look.
+- Approvals are part of the decision input, so a replay sees them; the portal lists the last 7
+  days, and `cqp_approvals_total` counts them.
 
 ### Waivers
 
@@ -396,9 +454,30 @@ release, switch it off, fix it, release again.
 block that follows isn't a surprise. Locally, with no Slack webhook, it goes to the notifier log.
 
 **Portal.** http://localhost:8080/portal shows active waivers (create or revoke them there),
-rules switched off, break-glass in the last 7 days, each service's tier, owner and team policy
-version, and recent decisions. Changes use a pasted token locally; in production the portal
-would sit behind company SSO.
+rules switched off, break-glass and approvals in the last 7 days, flaky test candidates, each
+service's tier, owner and team policy version, and recent decision outcomes. Changes use a pasted
+token locally; in production the portal would sit behind company SSO. A full decision record
+(`GET /v1/decisions/{id}`) needs a token, because it carries the evidence, CVE IDs included.
+
+**Changing the baseline.** A team policy change is backtested on its MR; so is the baseline.
+`cqp baseline backtest --file policy/baseline.rego` (platform team) runs a candidate on the last
+200 final decisions across every service and lists which outcomes would change. The CQP repo's
+own CI runs it on any MR that touches `policy/baseline.rego`.
+
+## Local development
+
+Before pushing, judge local reports under the real rules (baseline, team policy, active waivers
+and kill switches). It needs `CQP_URL` but no token, and records nothing:
+
+```bash
+cqp preview --service payments-api --stage pr \
+  --report "tests.unit:junit:build/test-results/**/*.xml" --report "scan.secrets:sarif:gitleaks.sarif"
+```
+
+It prints the outcome, each finding, and the expected checks it didn't see ("not checked locally
+(CI will run them)"), and exits like the gate, so it works as a pre-push hook.
+
+`cqp explain <decision>` prints any decision's findings, each with what you can do next.
 
 ## Adoption modes
 
@@ -433,6 +512,7 @@ scrapes them, and `ops/prometheus/alerts.yml` turns the SLOs into alerts:
 | `cqp_notifications_total{target,result}` | GitLab and Slack calls: ok, skipped or error |
 | `cqp_waiting_gate_jobs`, `cqp_gate_retries_total` | Gates waiting on evidence, and gates resumed |
 | `cqp_break_glass_total{stage}`, `cqp_kill_switches_active` | Emergency overrides and rules switched off |
+| `cqp_approvals_total{stage}` | Decisions a person approved after they needed validation |
 
 | Alert | Severity | Fires when |
 | --- | --- | --- |
@@ -593,9 +673,10 @@ The build job writes the image digest to `.cqp/image-digest`, so later reports a
     as stale today);
   - linking incidents back to the decision that let the change through, and the nightly re-scan
     of running images;
-  - "new vs existing" findings: any failing scan counts today;
-  - flaky-test quarantine;
-  - tier-1 local checks in the gate's fallback;
+  - signed build attestations (SLSA provenance via Sigstore) instead of the self-reported image
+    digest; today a protected branch is what makes evidence trusted;
+  - re-running the gate job automatically after an approval (re-run it by hand today);
+  - per-test flake scores across services, and expiry for quarantine entries;
   - Slack routing per owning team (one webhook today);
   - deploy-system integration (its pre-deploy hook and approval step);
   - for observability:

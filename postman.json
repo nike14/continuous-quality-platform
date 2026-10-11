@@ -548,7 +548,7 @@
           }
         },
         {
-          "name": "4. Anyone reads the stored decision",
+          "name": "4. A developer reads the stored decision",
           "event": [
             {
               "listen": "test",
@@ -576,9 +576,51 @@
               ]
             },
             "auth": {
-              "type": "noauth"
+              "type": "jwt",
+              "jwt": [
+                {
+                  "key": "algorithm",
+                  "value": "RS256",
+                  "type": "string"
+                },
+                {
+                  "key": "privateKey",
+                  "value": "{{dev_private_key}}",
+                  "type": "string"
+                },
+                {
+                  "key": "payload",
+                  "value": "{\n  \"aud\": \"cqp\",\n  \"iat\": {{iat}},\n  \"exp\": {{exp}},\n  \"project_path\": \"payments/payments-api\",\n  \"sha\": \"0000000000000000000000000000000000000000\",\n  \"job_id\": {{job_id}},\n  \"user_login\": \"dev\"\n}",
+                  "type": "string"
+                },
+                {
+                  "key": "header",
+                  "value": "{\"kid\": \"cqp-dev\"}",
+                  "type": "string"
+                },
+                {
+                  "key": "isSecretBase64Encoded",
+                  "value": false,
+                  "type": "boolean"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "headerPrefix",
+                  "value": "Bearer",
+                  "type": "string"
+                },
+                {
+                  "key": "queryParamKey",
+                  "value": "token",
+                  "type": "string"
+                }
+              ]
             },
-            "description": "**Who calls this in real life:** anyone (the MR comment links to it); no token needed.\n\n**Expect:** `200`: the same decision, plus `input`, the exact evidence and rules it was decided on. Decisions are never changed afterwards: this is the audit trail."
+            "description": "**Who calls this in real life:** anyone (the MR comment links to it); no token needed.\n\n**Expect:** `200`: the same decision, plus `input`, the exact evidence and rules it was decided on. Decisions are never changed afterwards: this is the audit trail.\n\nNeeds a token: a decision record carries the full evidence (failing tests, CVE IDs). Any valid CQP token will do; this one is a payments-api CI token."
           }
         },
         {
@@ -5890,7 +5932,7 @@
           }
         },
         {
-          "name": "6. Anyone reads decision A again → still PROCEED",
+          "name": "6. A developer reads decision A again → still PROCEED",
           "event": [
             {
               "listen": "test",
@@ -5918,9 +5960,51 @@
               ]
             },
             "auth": {
-              "type": "noauth"
+              "type": "jwt",
+              "jwt": [
+                {
+                  "key": "algorithm",
+                  "value": "RS256",
+                  "type": "string"
+                },
+                {
+                  "key": "privateKey",
+                  "value": "{{dev_private_key}}",
+                  "type": "string"
+                },
+                {
+                  "key": "payload",
+                  "value": "{\n  \"aud\": \"cqp\",\n  \"iat\": {{iat}},\n  \"exp\": {{exp}},\n  \"project_path\": \"payments/payments-api\",\n  \"sha\": \"0000000000000000000000000000000000000000\",\n  \"job_id\": {{job_id}},\n  \"user_login\": \"dev\"\n}",
+                  "type": "string"
+                },
+                {
+                  "key": "header",
+                  "value": "{\"kid\": \"cqp-dev\"}",
+                  "type": "string"
+                },
+                {
+                  "key": "isSecretBase64Encoded",
+                  "value": false,
+                  "type": "boolean"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "headerPrefix",
+                  "value": "Bearer",
+                  "type": "string"
+                },
+                {
+                  "key": "queryParamKey",
+                  "value": "token",
+                  "type": "string"
+                }
+              ]
             },
-            "description": "**Who calls this in real life:** anyone; no token needed.\n\n**Expect:** `200`, decision A, still `PROCEED` with `team_policy_version: null`. Rules never rewrite decisions already made."
+            "description": "**Who calls this in real life:** anyone; no token needed.\n\n**Expect:** `200`, decision A, still `PROCEED` with `team_policy_version: null`. Rules never rewrite decisions already made.\n\nNeeds a token: a decision record carries the full evidence (failing tests, CVE IDs). Any valid CQP token will do; this one is a payments-api CI token."
           }
         },
         {
@@ -6111,7 +6195,7 @@
       ]
     },
     {
-      "name": "12 · Read-only views (no token)",
+      "name": "12 · Read-only views (no token, except a full decision)",
       "description": "Everything here is read-only and needs no token. Run it any time.\n\n**Read first:** `docs/flows/12-read-only-views.md`\n\n**Who is who in this folder** (each request's Authorization tab shows the token):\n\n| Actor | Token |\n| --- | --- |\n| Anyone | no token |\n\n**Steps and what you should see:**\n\n1. Portal page → `200` (HTML)\n2. Active waivers for checkout-web → `200`\n3. payments-api's team policy (none) → `200`\n4. The last decision → `200`\n",
       "item": [
         {
@@ -6244,9 +6328,84 @@
               ]
             },
             "auth": {
+              "type": "jwt",
+              "jwt": [
+                {
+                  "key": "algorithm",
+                  "value": "RS256",
+                  "type": "string"
+                },
+                {
+                  "key": "privateKey",
+                  "value": "{{dev_private_key}}",
+                  "type": "string"
+                },
+                {
+                  "key": "payload",
+                  "value": "{\n  \"aud\": \"cqp\",\n  \"iat\": {{iat}},\n  \"exp\": {{exp}},\n  \"project_path\": \"payments/payments-api\",\n  \"sha\": \"0000000000000000000000000000000000000000\",\n  \"job_id\": {{job_id}},\n  \"user_login\": \"dev\"\n}",
+                  "type": "string"
+                },
+                {
+                  "key": "header",
+                  "value": "{\"kid\": \"cqp-dev\"}",
+                  "type": "string"
+                },
+                {
+                  "key": "isSecretBase64Encoded",
+                  "value": false,
+                  "type": "boolean"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "headerPrefix",
+                  "value": "Bearer",
+                  "type": "string"
+                },
+                {
+                  "key": "queryParamKey",
+                  "value": "token",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "**Who calls this in real life:** anyone.\n\n**Expect:** `200`, the decision saved as `{{decision_id}}`, with its full `input`.\n\nNeeds a token: a decision record carries the full evidence (failing tests, CVE IDs). Any valid CQP token will do; this one is a payments-api CI token."
+          }
+        },
+        {
+          "name": "5. Without a token the decision record is refused → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{cqp_url}}/v1/decisions/{{decision_id}}",
+              "host": [
+                "{{cqp_url}}"
+              ],
+              "path": [
+                "v1",
+                "decisions",
+                "{{decision_id}}"
+              ]
+            },
+            "auth": {
               "type": "noauth"
             },
-            "description": "**Who calls this in real life:** anyone.\n\n**Expect:** `200`, the decision saved as `{{decision_id}}`, with its full `input`."
+            "description": "The portal and the list endpoints need no token, but a full decision record does: it carries the evidence the decision was made on. Expect 401."
           }
         }
       ]
@@ -7110,9 +7269,51 @@
               ]
             },
             "auth": {
-              "type": "noauth"
+              "type": "jwt",
+              "jwt": [
+                {
+                  "key": "algorithm",
+                  "value": "RS256",
+                  "type": "string"
+                },
+                {
+                  "key": "privateKey",
+                  "value": "{{dev_private_key}}",
+                  "type": "string"
+                },
+                {
+                  "key": "payload",
+                  "value": "{\n  \"aud\": \"cqp\",\n  \"iat\": {{iat}},\n  \"exp\": {{exp}},\n  \"project_path\": \"payments/payments-api\",\n  \"sha\": \"0000000000000000000000000000000000000000\",\n  \"job_id\": {{job_id}},\n  \"user_login\": \"dev\"\n}",
+                  "type": "string"
+                },
+                {
+                  "key": "header",
+                  "value": "{\"kid\": \"cqp-dev\"}",
+                  "type": "string"
+                },
+                {
+                  "key": "isSecretBase64Encoded",
+                  "value": false,
+                  "type": "boolean"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header",
+                  "type": "string"
+                },
+                {
+                  "key": "headerPrefix",
+                  "value": "Bearer",
+                  "type": "string"
+                },
+                {
+                  "key": "queryParamKey",
+                  "value": "token",
+                  "type": "string"
+                }
+              ]
             },
-            "description": "**Who calls this in real life:** anyone.\n\n**Expect:** `404`: `no such decision`."
+            "description": "**Who calls this in real life:** anyone.\n\n**Expect:** `404`: `no such decision`.\n\nNeeds a token: a decision record carries the full evidence (failing tests, CVE IDs). Any valid CQP token will do; this one is a payments-api CI token."
           }
         }
       ]

@@ -24,14 +24,17 @@ ends with a link to the next.
 | 9 | [Kill switch](09-kill-switch.md) | Platform team (`cqp kill-switch`) | `POST`/`GET`/`DELETE /v1/kill-switches` |
 | 10 | [When rules are set, and changing them mid-flow](10-rules-mid-flow.md) | Platform team, teams, approvers | When each kind of rule takes effect; a live example of a rule added mid-flow |
 | 11 | [What CQP calls: GitLab and Slack](11-notifications.md) | The notifier | GitLab MR notes, commit statuses, job retry; Slack |
-| 12 | [Read-only views](12-read-only-views.md) | Anyone, no token | `GET /portal` and the `GET` endpoints |
+| 12 | [Read-only views](12-read-only-views.md) | Anyone (a token for a full decision) | `GET /portal` and the `GET` endpoints |
 | 13 | [Testing with Postman](13-postman-testing.md) | You | Setup, how the collection imitates CI, the order to run it in |
+| 14 | [Approvals, flaky tests and checking locally](14-approvals-flaky-preview.md) | Approvers, developers | `POST /v1/decisions/{id}/approvals`, `GET /v1/flaky`, `POST /v1/preview`, `cqp explain` |
 
 - **Steps 1 and 2** are the basics every other flow builds on.
 - **Steps 3 to 9** are the flows, from the first MR to production.
 - **Step 10** explains when rules take effect, and what happens when they change mid-flow.
 - **Steps 11 and 12** are what CQP does after deciding, and how to look at the results.
 - **Step 13** is how to try every flow yourself in Postman.
+- **Step 14** is the ways past a decision that aren't emergencies: approving, quarantining a flaky
+  test, and checking locally first.
 
 ## The four outcomes
 
@@ -40,7 +43,8 @@ ends with a link to the next.
 | --- | --- | --- |
 | `PROCEED` | All good | 0 |
 | `PROCEED_WITH_WARNING` | Fine, but something should be looked at | 0 |
-| `REQUIRE_VALIDATION` | A person must approve, or evidence is still missing | 2 |
+| `REQUIRE_VALIDATION` | A person must approve (`cqp approve`) | 2 |
+| `REQUIRE_VALIDATION`, status `pending` | Still waiting for evidence; the notifier re-runs the job | 3 |
 | `BLOCKED` | Must not move on | 1 |
 
 ## Who calls CQP, and who CQP calls
@@ -71,7 +75,10 @@ People: cqp waiver / kill-switch / break-glass, portal ───┘
 | Security and approvers | `cqp waiver`, or the portal | `POST /v1/waivers`, `DELETE /v1/waivers/{id}` |
 | On-call engineers | `cqp break-glass` | `POST /v1/decisions/{id}/break-glass` |
 | Platform team | `cqp kill-switch`, or the API directly | `POST /v1/kill-switches`, `DELETE /v1/kill-switches/{id}` |
-| Anyone | Browser or curl, no token | `GET /portal`, `GET /v1/decisions/{id}`, `GET /v1/waivers`, `GET /v1/kill-switches`, `GET /v1/team-policies/{service}` |
+| Approvers (not the author) | `cqp approve` | `POST /v1/decisions/{id}/approvals` |
+| Developers, before pushing | `cqp preview` (no token, nothing recorded), `cqp explain` | `POST /v1/preview`, `GET /v1/decisions/{id}` |
+| Platform team, on a baseline MR | `cqp baseline backtest` | `POST /v1/baseline/backtest` |
+| Anyone | Browser or curl, no token | `GET /portal`, `GET /v1/waivers`, `GET /v1/kill-switches`, `GET /v1/team-policies/{service}`, `GET /v1/flaky` |
 
 All of these go to one URL. The gateway (`Caddyfile`) sends `/v1/decisions*`, `/v1/team-policies*`,
 `/v1/waivers*`, `/v1/kill-switches*` and `/portal*` to the Decision API, and everything else

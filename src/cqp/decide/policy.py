@@ -91,6 +91,10 @@ class Policy:
         """Why this person can't switch this rule off (empty when they can)."""
         return sorted(self._query("kill_errors", {"kill": kill, "role": role}))
 
+    def approval_errors(self, role: str | None) -> list[str]:
+        """Why this person can't approve a decision (empty when they can)."""
+        return sorted(self._query("approval_errors", {"role": role}))
+
     def break_glass_errors(self, role: str | None) -> list[str]:
         """Why this person can't break glass (empty when they can)."""
         return sorted(self._query("break_glass_errors", {"role": role}))

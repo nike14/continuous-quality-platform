@@ -41,6 +41,20 @@ def cqp(monkeypatch):
                     "waiting": [],
                 },
             )
+        if request.url.path == "/v1/preview":
+            return httpx.Response(
+                200,
+                json={
+                    "outcome": "PROCEED",
+                    "findings": [],
+                    "not_checked": [],
+                    "policy_version": "abc",
+                },
+            )
+        if request.url.path.endswith("/approvals"):
+            return httpx.Response(
+                201, json={"approval_id": "a-1", "stage": "integration", "findings": []}
+            )
         return httpx.Response(201, json={"kill_id": "k-1", "rule": "r", "expires_at": "t"})
 
     transport, real_client = httpx.MockTransport(handler), httpx.Client
@@ -97,3 +111,21 @@ def test_kill_switch_needs_no_service(cqp):
         cli.main(["kill-switch", "--rule", "baseline.tests.unit", "--reason", "bad release"]) == 0
     )
     assert cqp[0].url.path == "/v1/kill-switches"
+
+
+def test_approve_posts_to_the_decision(cqp):
+    assert cli.main(["approve", "--decision", "d-1", "--reason", "known spike"]) == 0
+    assert cqp[0].url.path == "/v1/decisions/d-1/approvals"
+    assert json.loads(cqp[0].content) == {"reason": "known spike", "ticket": None}
+
+
+def test_preview_needs_no_token(cqp, monkeypatch):
+    # A laptop has no CI token, and a preview records nothing.
+    monkeypatch.delenv("CQP_TOKEN")
+    args = ["preview", "--service", "payments-api", "--report", "tests.unit:junit:*.xml"]
+    assert cli.main(args) == 0
+    assert cqp[0].url.path == "/v1/preview" and "authorization" not in cqp[0].headers
+
+
+def test_explain_without_a_token_fails():
+    assert cli.main(["explain", "d-1"]) == 1
